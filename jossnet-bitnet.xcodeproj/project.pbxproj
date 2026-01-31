@@ -19,7 +19,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		C8B096532F2E6AB900CD29A1 /* jossnet-bitnet */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "jossnet-bitnet"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C8B096532F2E6AB900CD29A1 /* jossnet-bitnet */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "jossnet-bitnet"; path = "/Users/jossua/Documents/jossnet-bitnet/jossnet-bitnet/build/Debug/jossnet-bitnet"; sourceTree = "<absolute>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -44,17 +44,16 @@
 		C8B0964A2F2E6AB900CD29A1 = {
 			isa = PBXGroup;
 			children = (
+				C8B096642F2E6C6B00CD29A1 /* resources */,
 				C8B096552F2E6AB900CD29A1 /* jossnet-bitnet */,
-				C8B096542F2E6AB900CD29A1 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		C8B096542F2E6AB900CD29A1 /* Products */ = {
+		C8B096642F2E6C6B00CD29A1 /* resources */ = {
 			isa = PBXGroup;
 			children = (
-				C8B096532F2E6AB900CD29A1 /* jossnet-bitnet */,
 			);
-			name = Products;
+			path = resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -107,7 +106,7 @@
 			mainGroup = C8B0964A2F2E6AB900CD29A1;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = C8B096542F2E6AB900CD29A1 /* Products */;
+			productRefGroup = C8B0964A2F2E6AB900CD29A1;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
