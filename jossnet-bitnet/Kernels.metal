@@ -32,3 +32,12 @@ kernel void mult(device const float* X [[ buffer(0) ]],
     uint index_Answer = gid.y * nbLineW + gid.x;
     answer[index_Answer] = sum;
 }
+kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
+                             device float* answer [[ buffer(8) ]],
+                             device const uchar* index [[ buffer(9) ]],
+                             device const int* nbCols [[ buffer(10) ]],
+                             uint2 gid [[ thread_position_in_grid ]]){
+    int idx = static_cast<int>(index[0]);
+    int cols = nbCols[0];
+    answer[gid.x] = embeddingTable[idx * cols + gid.x];
+}
