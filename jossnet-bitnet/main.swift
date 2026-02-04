@@ -148,7 +148,11 @@ let bufferPointer = UnsafeBufferPointer(start: floatPointer, count: colsEmbeddin
 
 let resultArray = Array(bufferPointer)
 
-print("\n--- RÉSULTAT EMBEDDING (Token \(testValueEmbedding)) ---")
-print("Premières valeurs : \(resultArray)")
+//print(resultArray)
+
+
+if let Id = getId(word : "hello") {
+    print("ID : \(Id)")
+}
 
 print("Finished")
