@@ -39,3 +39,27 @@ func getId(word:String)->UInt32?{
             return nil
         }
 }
+func formatString(str:String)->[UInt32]{
+    let pattern = #"(\w+|[^\w\s]+)"#
+    var result : [UInt32] = []
+    do{
+        let regex = try NSRegularExpression(pattern: pattern);
+        let nsString = str as NSString
+        let results = regex.matches(in: str, range: NSRange(location: 0, length: nsString.length))
+        
+        for (_, match) in results.enumerated() {
+            let word = nsString.substring(with: match.range)
+                print("word : \(word)")
+            if let id = getId(word: word) {
+                result.append(id)
+            }else{
+                // TODO :
+                // Check if a unknow token exist in tokenizer
+                //result.append(0)
+            }
+        }
+    } catch {
+        print("ERROR REGEX : \(error)")
+    }
+    return result
+}

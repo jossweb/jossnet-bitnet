@@ -151,8 +151,7 @@ let resultArray = Array(bufferPointer)
 //print(resultArray)
 
 
-if let Id = getId(word : "hello") {
-    print("ID : \(Id)")
-}
+
+print("ID : \(formatString(str : "Hi, my name is Jossua!") )")
 
 print("Finished")
