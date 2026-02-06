@@ -6,12 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		C8F48FEB2F3292E800A5CAF6 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = C8F48FEA2F3292E800A5CAF6 /* Hub */; };
-		C8F48FED2F3292E800A5CAF6 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = C8F48FEC2F3292E800A5CAF6 /* Tokenizers */; };
-		C8F48FEF2F3292E800A5CAF6 /* Transformers in Frameworks */ = {isa = PBXBuildFile; productRef = C8F48FEE2F3292E800A5CAF6 /* Transformers */; settings = {ATTRIBUTES = (Required, ); }; };
-/* End PBXBuildFile section */
-
 /* Begin PBXCopyFilesBuildPhase section */
 		C8B096512F2E6AB900CD29A1 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -41,9 +35,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C8F48FEF2F3292E800A5CAF6 /* Transformers in Frameworks */,
-				C8F48FED2F3292E800A5CAF6 /* Tokenizers in Frameworks */,
-				C8F48FEB2F3292E800A5CAF6 /* Hub in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

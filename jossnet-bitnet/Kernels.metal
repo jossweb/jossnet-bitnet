@@ -34,10 +34,30 @@ kernel void mult(device const float* X [[ buffer(0) ]],
 }
 kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
                              device float* answer [[ buffer(8) ]],
-                             device const uchar* index [[ buffer(9) ]],
-                             device const int* nbCols [[ buffer(10) ]],
+                             device const uint* index [[ buffer(9) ]],
+                             device const uint* nbCols [[ buffer(10) ]],
                              uint2 gid [[ thread_position_in_grid ]]){
-    int idx = static_cast<int>(index[0]);
+    // gid.y : actual token in tab
+    // gid.x : index for actual token
+    uint tokenId = index[gid.y];
     int cols = nbCols[0];
-    answer[gid.x] = embeddingTable[idx * cols + gid.x];
+    answer[gid.x + gid.y * cols] = embeddingTable[tokenId * cols + gid.x];
+}
+
+kernel void rmsNorm(device float* vecList [[ buffer(11) ]],
+                    device const uint* nbCols [[ buffer(12) ]],
+                    uint2 gid [[ thread_position_in_grid ]]){
+    
+    uint startingIndex = gid.x * *nbCols;
+    
+    float powSum = 0;
+    for(uint i = startingIndex; i < startingIndex + *nbCols; i++){
+        powSum += vecList[i] * vecList[i];
+    }
+    if(powSum != 0){
+        float coeff = sqrt(powSum/ *nbCols);
+        for(uint i = startingIndex; i < startingIndex + *nbCols; i++){
+            vecList[i] = vecList [i] / coeff;
+        }
+    }
 }
