@@ -129,10 +129,18 @@ func Main()->String?{
     encoderRms.endEncoding()
 
     //mult
-    let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
     let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
-    let bufferA = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
-
+    //q
+    let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
+    let bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
+    
+    //k
+    let wKSize = matrixInfos(nbLine : 640, nbColumn : 640)
+    let bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
+    
+    //v
+    let wVSize = matrixInfos(nbLine : 640, nbColumn : 640)
+    let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
     // Start
 
     commandBuffer.commit()
@@ -146,13 +154,7 @@ func Main()->String?{
 
     let resultArray = Array(bufferPointer)
 
-    let rawPointerMultAns = bufferA!.contents()
-
-    let floatPointerMultAns = rawPointerMultAns.bindMemory(to: Float.self, capacity: Int(colsEmbeddings) * tokens.count)
-
-    let bufferPointerMultAns = UnsafeBufferPointer(start: floatPointerMultAns, count: Int(colsEmbeddings) * tokens.count)
-
-    let resultArrayMultAns = Array(bufferPointerMultAns)
+    
 
     print("Nb tokens : \(resultArray.count/2560)")
 
@@ -162,11 +164,34 @@ func Main()->String?{
         print("Valeur Token 1 [0] : \(resultArray[stride])")
     }
 
-    print("Here result mult :\n \(resultArrayMultAns)")
+    let resultArrayMultQ = GetFromBuffer(buffer: bufferQ, size: (Int(colsEmbeddings) * tokens.count))
+    
+    let resultArrayMultV = GetFromBuffer(buffer: bufferV, size: (640 * tokens.count))
+    
+    let resultArrayMultK = GetFromBuffer(buffer: bufferK, size: (640 * tokens.count))
+    
+    
+    print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
+    
+    print("Here result mult Q :\n \(resultArrayMultV[0..<10])")
+    
+    print("Here result mult Q :\n \(resultArrayMultK[0..<10])")
+    
     return("ok")
 }
 
+func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
+    guard let buffer = buffer else {
+        return []
+    }
+    let rawPointer = buffer.contents()
 
+    let floatPointer = rawPointer.bindMemory(to: Float.self, capacity: size)
+
+    let bufferPointer = UnsafeBufferPointer(start: floatPointer, count: size)
+
+    return Array(bufferPointer)
+}
 
 func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input : MTLBuffer, commandBuffer: MTLCommandBuffer) -> MTLBuffer?{
     var nbLineW = UInt32(WSize.nbLine)
