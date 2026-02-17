@@ -34,7 +34,25 @@ guard let kernelFunctionGetFromEmbedding = library.makeFunction(name: "getFromEm
     fatalError("Error : Function getFromEmbedding is not available")
 }
 guard let kernelFunctionRmsNorm = library.makeFunction(name: "rmsNorm") else {
-    fatalError("Error : Function getFromEmbedding is not available")
+    fatalError("Error : Function rmsNorm is not available")
+}
+guard let kernelFunctionRoPE = library.makeFunction(name: "RoPE") else {
+    fatalError("Error : Function RoPE is not available")
+}
+guard let kernelFunctionAttentionScore = library.makeFunction(name: "AttentionScore") else {
+    fatalError("Error : Function RoPE is not available")
+}
+guard let kernelFunctionSearchMaxVector = library.makeFunction(name: "SearchMaxVector") else {
+    fatalError("Error : Function SearchMaxVector is not available")
+}
+guard let kernelFunctionSubstractMax = library.makeFunction(name: "SubstractMax") else {
+    fatalError("Error : Function substractMax is not available")
+}
+guard let kernelFunctionSumVector = library.makeFunction(name: "SumVector") else {
+    fatalError("Error : Function SumVector is not available")
+}
+guard let kernelFunctionDivideBySum = library.makeFunction(name: "DivideBySum") else {
+    fatalError("Error : Function divideBySum is not available")
 }
 print(Main()!)
 
@@ -96,7 +114,7 @@ func Main()->String?{
     let embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
 
     let embeddingsResponseBuffer = metal.makeBuffer(length: (colsEmbeddings * MemoryLayout<Float>.size) * tokens.count, options: .storageModeShared)!
-    var tokensInput = metal.makeBuffer(bytes: tokens, length: tokens.count * MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    let tokensInput = metal.makeBuffer(bytes: tokens, length: tokens.count * MemoryLayout<UInt32>.size, options: .storageModeShared)!
 
     let bufferNbColsEmbeddings = metal.makeBuffer(bytes: &colsEmbeddings, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
 
@@ -132,15 +150,33 @@ func Main()->String?{
     let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
     //q
     let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
-    let bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
+    var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
     
     //k
     let wKSize = matrixInfos(nbLine : 640, nbColumn : 640)
-    let bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
+    var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
     
     //v
     let wVSize = matrixInfos(nbLine : 640, nbColumn : 640)
     let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, input: embeddingsResponseBuffer, commandBuffer: commandBuffer)
+    
+    // RoPE
+    bufferQ = ApplyRoPE(buffer : bufferQ, nbCols : InputSize.nbLine, nbLines : wSize.nbColumn, commandBuffer: commandBuffer)
+    
+    bufferK = ApplyRoPE(buffer : bufferK, nbCols : InputSize.nbLine, nbLines : wKSize.nbColumn, commandBuffer: commandBuffer)
+    
+    // Attention score
+    
+    var resultAttention = AttentionScore(buffer1: bufferQ, buffer2: bufferK, nbToken: tokens.count, commandBuffer: commandBuffer)
+    
+
+    let totalAttentionRows = 20 * tokens.count
+    let attentionWidth = tokens.count
+        
+    resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer)
+        
+    resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer)
+
     // Start
 
     commandBuffer.commit()
@@ -170,16 +206,185 @@ func Main()->String?{
     
     let resultArrayMultK = GetFromBuffer(buffer: bufferK, size: (640 * tokens.count))
     
+    let resultAttentionTest = GetFromBuffer(buffer: resultAttention, size: 20 * tokens.count * tokens.count )
+    
     
     print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
     
-    print("Here result mult Q :\n \(resultArrayMultV[0..<10])")
+    print("Here result mult V :\n \(resultArrayMultV[0..<10])")
     
-    print("Here result mult Q :\n \(resultArrayMultK[0..<10])")
+    print("Here result mult K :\n \(resultArrayMultK[0..<10])")
+    
+    print("Here result Attention :\n \(resultAttentionTest)")
     
     return("ok")
 }
+func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let mat else {
+        return nil
+    }
+    
+    let bufferSumValues = GetSumByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer)
+    
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionDivideBySum)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+    
+    var cols : UInt32 = UInt32(nbcols)
+    
+    let buffernbCols = metal.makeBuffer(bytes: &cols, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    
+    encoder.setBuffer(mat, offset: 0, index: 0)
+    encoder.setBuffer(buffernbCols, offset: 0, index: 1)
+    encoder.setBuffer(bufferSumValues, offset: 0, index: 2)
+    
+    let gridSize = MTLSize(width: nbcols, height: nbToken, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 32, depth: 1)
 
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return mat;
+    
+}
+func SubstractMax(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let mat else {
+        return nil
+    }
+    
+    let bufferMaxValues = GetMaxByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer)
+    
+    
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionSubstractMax)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+    
+    var cols : UInt32 = UInt32(nbcols)
+    
+    let buffernbCols = metal.makeBuffer(bytes: &cols, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    
+    encoder.setBuffer(mat, offset: 0, index: 0)
+    encoder.setBuffer(buffernbCols, offset: 0, index: 1)
+    encoder.setBuffer(bufferMaxValues, offset: 0, index: 2)
+    
+    let gridSize = MTLSize(width: nbcols, height: nbToken, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 32, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return mat;
+    
+}
+func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let mat else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionSumVector)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+    
+    var cols : UInt32 = UInt32(nbcols)
+    
+    
+    let buffernbCols = metal.makeBuffer(bytes: &cols, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    let bufferSumValues = metal.makeBuffer(length: MemoryLayout<Float>.size * nbToken, options : .storageModeShared)!
+    
+    encoder.setBuffer(mat, offset: 0, index: 0)
+    encoder.setBuffer(buffernbCols, offset: 0, index: 1)
+    encoder.setBuffer(bufferSumValues, offset: 0, index: 2)
+    
+    let gridSize = MTLSize(width: nbToken, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return bufferSumValues;
+}
+func GetMaxByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let mat else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionSearchMaxVector)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+    
+    var cols : UInt32 = UInt32(nbcols)
+    
+    
+    let buffernbCols = metal.makeBuffer(bytes: &cols, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    let bufferMaxValues = metal.makeBuffer(length: MemoryLayout<Float>.size * nbToken, options : .storageModeShared)!
+    
+    encoder.setBuffer(mat, offset: 0, index: 0)
+    encoder.setBuffer(buffernbCols, offset: 0, index: 1)
+    encoder.setBuffer(bufferMaxValues, offset: 0, index: 2)
+    
+    let gridSize = MTLSize(width: nbToken, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return bufferMaxValues;
+}
+func AttentionScore(buffer1 : MTLBuffer?, buffer2 : MTLBuffer?, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let buffer1, let buffer2 else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionAttentionScore)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+
+    let bufferAns = metal.makeBuffer(length: MemoryLayout<Float>.size * 20 * nbToken * nbToken, options: .storageModeShared)!
+    
+    let heads = 20
+    var headsInt = Int32(heads)
+    var nbTokenInt = Int32(nbToken)
+    var ratioInt = Int32(4.0)
+    
+    let bufferHeadQ = metal.makeBuffer(bytes: &headsInt, length: MemoryLayout<Int32>.size, options: .storageModeShared)!
+    let buffernbToken = metal.makeBuffer(bytes: &nbTokenInt, length: MemoryLayout<Int32>.size, options: .storageModeShared)!
+    let bufferRatioInt = metal.makeBuffer(bytes : &ratioInt, length: MemoryLayout<Int32>.size, options: .storageModeShared)!
+    
+    encoder.setBuffer(buffer1, offset: 0, index: 0)
+    encoder.setBuffer(buffer2, offset: 0, index: 1)
+    encoder.setBuffer(bufferAns, offset: 0, index: 2)
+    encoder.setBuffer(bufferHeadQ, offset: 0, index: 3)
+    encoder.setBuffer(buffernbToken, offset: 0, index: 4)
+    encoder.setBuffer(bufferRatioInt, offset: 0, index: 5)
+    
+    let gridSize = MTLSize(width: nbToken, height: nbToken, depth: heads)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return bufferAns;
+}
+func ApplyRoPE(buffer : MTLBuffer?, nbCols : Int, nbLines : Int,  commandBuffer : MTLCommandBuffer)->MTLBuffer?{
+    guard let buffer = buffer else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionRoPE)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline);
+    
+    var nbcols = nbCols
+    
+    let bufferNbColX = metal.makeBuffer(bytes: &nbcols, length: MemoryLayout<Int32>.size, options: .storageModeShared)!
+    
+    encoder.setBuffer(buffer, offset: 0, index: 0)
+    encoder.setBuffer(bufferNbColX, offset: 0, index: 1)
+    
+    let gridSize = MTLSize(width: nbCols, height: nbLines, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return buffer
+}
 func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
     guard let buffer = buffer else {
         return []
