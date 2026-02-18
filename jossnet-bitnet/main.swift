@@ -16,6 +16,7 @@ struct matrixInfos{
 let urlW = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_q.bin")
 let urlWk = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_k.bin")
 let urlWv = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_v.bin")
+let urlWo = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_o.bin")
 let urlEmbeddings = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/embeddings.bin")
 
 guard let metal = MTLCreateSystemDefaultDevice() else
@@ -54,17 +55,22 @@ guard let kernelFunctionSumVector = library.makeFunction(name: "SumVector") else
 guard let kernelFunctionDivideBySum = library.makeFunction(name: "DivideBySum") else {
     fatalError("Error : Function divideBySum is not available")
 }
+guard let kernelFunctionWeightedSum = library.makeFunction(name: "weightedSum") else {
+    fatalError("Error : Function divideBySum is not available")
+}
 print(Main()!)
 
 func Main()->String?{
     var dataW : Data
     var dataWk : Data
     var dataWv : Data
+    var dataWo : Data
     var dateEmbeddings : Data
     do{
         dataW = try Data(contentsOf: urlW)
         dataWk = try Data(contentsOf: urlWk)
         dataWv = try Data(contentsOf: urlWv)
+        dataWo = try Data(contentsOf: urlWo)
         dateEmbeddings = try Data(contentsOf: urlEmbeddings)
     }catch{
         return "Error : can't load the weights"
@@ -82,6 +88,12 @@ func Main()->String?{
         return Array(buffer)
     }
     let weightV = dataWv.withUnsafeBytes { ptr -> [Int8] in
+        let count = dataWv.count / MemoryLayout<Int8>.size
+        
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
+        return Array(buffer)
+    }
+    let weightO = dataWo.withUnsafeBytes { ptr -> [Int8] in
         let count = dataWv.count / MemoryLayout<Int8>.size
         
         let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
@@ -176,6 +188,15 @@ func Main()->String?{
     resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer)
         
     resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer)
+    
+    //context
+    let contextBuffer = ComputeWeightedSum(mat: resultAttention, v: bufferV, nbTokens: tokens.count, commandBuffer: commandBuffer)
+    
+    // mult by o
+    let wOSize = matrixInfos(nbLine: 2560, nbColumn: 2560)
+    let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+
+    let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, input: contextBuffer, commandBuffer: commandBuffer)
 
     // Start
 
@@ -190,7 +211,6 @@ func Main()->String?{
 
     let resultArray = Array(bufferPointer)
 
-    
 
     print("Nb tokens : \(resultArray.count/2560)")
 
@@ -208,6 +228,10 @@ func Main()->String?{
     
     let resultAttentionTest = GetFromBuffer(buffer: resultAttention, size: 20 * tokens.count * tokens.count )
     
+    let context = GetFromBuffer(buffer: contextBuffer, size:  tokens.count * 20 * 128)
+    
+    let Attention = GetFromBuffer(buffer: bufferAttentionOutput, size:  tokens.count * 20 * 128)
+    
     
     print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
     
@@ -215,9 +239,51 @@ func Main()->String?{
     
     print("Here result mult K :\n \(resultArrayMultK[0..<10])")
     
-    print("Here result Attention :\n \(resultAttentionTest)")
+    print("Here result Attention :\n \(resultAttentionTest[0..<10])")
+    
+    print("Here result context :\n \(context[0..<10])")
+    
+    print("Here result attention :\n \(Attention[0..<10])")
     
     return("ok")
+}
+func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBuffer: MTLCommandBuffer) -> MTLBuffer? {
+    guard let mat, let v else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionWeightedSum)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    
+    let nbHeads = 20
+    let headDim = 128
+    let ratio = 4
+    
+    let embedDim = nbHeads * headDim
+    let outputSize = nbTokens * embedDim * MemoryLayout<Float>.size
+    
+    guard let bufferOutput = metal.makeBuffer(length: outputSize, options: .storageModeShared) else { return nil }
+    
+    var tokens32 = Int32(nbTokens)
+    var heads32 = Int32(nbHeads)
+    var ratio32 = Int32(ratio)
+    
+    encoder.setBuffer(mat, offset: 0, index: 0)
+    encoder.setBuffer(v, offset: 0, index: 1)
+    encoder.setBuffer(bufferOutput, offset: 0, index: 2)
+    
+    encoder.setBytes(&tokens32, length: 4, index: 3)
+    encoder.setBytes(&heads32, length: 4, index: 4)
+    encoder.setBytes(&ratio32, length: 4, index: 5)
+
+    let gridSize = MTLSize(width: headDim, height: nbTokens, depth: nbHeads)
+    
+    let threadGroup = MTLSize(width: 32, height: 1, depth: 1)
+    
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroup)
+    encoder.endEncoding()
+    
+    return bufferOutput
 }
 func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer)->MTLBuffer?{
     guard let mat else {
@@ -398,7 +464,10 @@ func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
     return Array(bufferPointer)
 }
 
-func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input : MTLBuffer, commandBuffer: MTLCommandBuffer) -> MTLBuffer?{
+func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input : MTLBuffer?, commandBuffer: MTLCommandBuffer) -> MTLBuffer?{
+    guard let input = input else {
+        return nil
+    }
     var nbLineW = UInt32(WSize.nbLine)
     var nbColW = UInt32(WSize.nbColumn)
     var nbLineInput = UInt32(inputSize.nbLine)
