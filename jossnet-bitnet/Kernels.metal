@@ -197,3 +197,9 @@ kernel void addArrays(device float* A [[ buffer(0) ]],
 {
     A[id] += B[id];
 }
+kernel void siluAndMul(device float* Gate [[ buffer(0) ]],
+                         device const float* Up [[ buffer(1) ]],
+                         uint id [[ thread_position_in_grid ]])
+{
+    Gate[id] = (Gate[id] * 1.0f / (1.0f + exp(-Gate[id]))) * Up[id];
+}

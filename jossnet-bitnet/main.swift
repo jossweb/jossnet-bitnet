@@ -65,6 +65,9 @@ guard let kernelFunctionWeightedSum = library.makeFunction(name: "weightedSum") 
 guard let kernelFunctionAddArrays = library.makeFunction(name: "addArrays") else {
     fatalError("Error : Function divideBySum is not available")
 }
+guard let kernelFunctionSiluAndMul = library.makeFunction(name: "siluAndMul") else {
+    fatalError("Error : Function siluAndMul is not available")
+}
 print(Main()!)
 
 func Main()->String?{
@@ -231,7 +234,7 @@ func Main()->String?{
     let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, input: contextBuffer, commandBuffer: commandBuffer)
     
     //add
-    let  addResult = AddArray(mat1: embeddingsResponseBuffer, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: commandBuffer)
+    let addResult = AddArray(mat1: embeddingsResponseBuffer, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: commandBuffer)
     
     // apply rms norm
     let rmsNormResult = ApplyRmsNorm(entry: addResult, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer)!
@@ -244,6 +247,16 @@ func Main()->String?{
     let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, input: rmsNormResult, commandBuffer: commandBuffer)
     
     let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, input: rmsNormResult, commandBuffer: commandBuffer)
+    
+    let sizeIntermediaire = tokens.count * 6912
+    ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: commandBuffer)
+    
+    let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
+    let weightsSizeDown = matrixInfos(nbLine: 6912, nbColumn: 2560)
+    
+    let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, input: gateResult, commandBuffer: commandBuffer)
+    _ = AddArray(mat1: addResult, mat2: downResult, size: tokens.count * 2560, commandBuffer: commandBuffer)
+
 
     // Start
 
@@ -284,6 +297,8 @@ func Main()->String?{
     let uptab = GetFromBuffer(buffer: upResult, size:  tokens.count * 20 * 128)
     
     let gatetab = GetFromBuffer(buffer: gateResult, size:  tokens.count * 20 * 128)
+
+    let layer0Output = GetFromBuffer(buffer: addResult, size: 10)
     
     
     print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
@@ -304,7 +319,25 @@ func Main()->String?{
     
     print("Here result tab :\n \(gatetab[0..<10])")
     
+    print("Exit : \n \(layer0Output[0..<10])")
+    
     return("ok")
+}
+func ApplySiLUandMul(gate: MTLBuffer?, up : MTLBuffer?, size : Int, commandBuffer: MTLCommandBuffer) -> Void {
+    guard let gate = gate, let up = up else { return }
+    
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionSiluAndMul)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    
+    encoder.setBuffer(gate, offset: 0, index: 0)
+    encoder.setBuffer(up, offset: 0, index: 1)
+    
+    let gridSize = MTLSize(width: size, height: 1, depth: 1)
+    let threadGroup = MTLSize(width: 32, height: 1, depth: 1)
+    
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroup)
+    encoder.endEncoding()
 }
 func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, tokenCount : Int, commandBuffer: MTLCommandBuffer)->MTLBuffer?{
     guard let entry, let weightRMS else {
