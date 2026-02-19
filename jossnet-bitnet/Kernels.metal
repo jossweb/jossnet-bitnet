@@ -44,20 +44,25 @@ kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
     answer[gid.x + gid.y * cols] = embeddingTable[tokenId * cols + gid.x];
 }
 
-kernel void rmsNorm(device float* vecList [[ buffer(11) ]],
-                    device const uint* nbCols [[ buffer(12) ]],
+kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
+                    device const uint* nbCols [[ buffer(2) ]],
+                    device const float* weight [[ buffer(3) ]],
+                    device float* answer [[ buffer(4) ]],
                     uint2 gid [[ thread_position_in_grid ]]){
     
     uint startingIndex = gid.x * *nbCols;
-    
+
     float powSum = 0;
-    for(uint i = startingIndex; i < startingIndex + *nbCols; i++){
-        powSum += vecList[i] * vecList[i];
+    for(uint i = 0; i < *nbCols; i++){
+        float val = vecList[startingIndex + i];
+        powSum += val * val;
     }
+    
     if(powSum != 0){
-        float coeff = sqrt(powSum/ *nbCols);
-        for(uint i = startingIndex; i < startingIndex + *nbCols; i++){
-            vecList[i] = vecList [i] / coeff;
+        float meanSquare = powSum / (float)(*nbCols);
+        float coeff = sqrt(meanSquare + 1e-5);
+        for(uint i = 0; i < *nbCols; i++){
+            answer[startingIndex + i] = (vecList[startingIndex + i] / coeff) * weight[i];
         }
     }
 }
@@ -185,4 +190,10 @@ kernel void weightedSum(device const float* Scores [[ buffer(0) ]],
     int index_out = (gid.y * width_Out_line) + (gid.z * head_dim) + gid.x;
     
     Output[index_out] = sum;
+}
+kernel void addArrays(device float* A [[ buffer(0) ]],
+                       device const float* B [[ buffer(1) ]],
+                       uint id [[ thread_position_in_grid ]])
+{
+    A[id] += B[id];
 }

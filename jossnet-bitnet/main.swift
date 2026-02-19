@@ -17,6 +17,10 @@ let urlW = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weigh
 let urlWk = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_k.bin")
 let urlWv = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_v.bin")
 let urlWo = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_o.bin")
+let urlRMS = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_RMS_mlp.bin")
+let urlDown = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_down.bin")
+let urlUp = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_up.bin")
+let urlGate = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_gate.bin")
 let urlEmbeddings = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/embeddings.bin")
 
 guard let metal = MTLCreateSystemDefaultDevice() else
@@ -58,6 +62,9 @@ guard let kernelFunctionDivideBySum = library.makeFunction(name: "DivideBySum") 
 guard let kernelFunctionWeightedSum = library.makeFunction(name: "weightedSum") else {
     fatalError("Error : Function divideBySum is not available")
 }
+guard let kernelFunctionAddArrays = library.makeFunction(name: "addArrays") else {
+    fatalError("Error : Function divideBySum is not available")
+}
 print(Main()!)
 
 func Main()->String?{
@@ -65,12 +72,20 @@ func Main()->String?{
     var dataWk : Data
     var dataWv : Data
     var dataWo : Data
+    var dataWRMS : Data
+    var dataWUp : Data
+    var dataWDown : Data
+    var dataWGate : Data
     var dateEmbeddings : Data
     do{
         dataW = try Data(contentsOf: urlW)
         dataWk = try Data(contentsOf: urlWk)
         dataWv = try Data(contentsOf: urlWv)
         dataWo = try Data(contentsOf: urlWo)
+        dataWRMS = try Data(contentsOf: urlRMS)
+        dataWUp = try Data(contentsOf: urlUp)
+        dataWDown = try Data(contentsOf: urlDown)
+        dataWGate = try Data(contentsOf: urlGate)
         dateEmbeddings = try Data(contentsOf: urlEmbeddings)
     }catch{
         return "Error : can't load the weights"
@@ -94,11 +109,40 @@ func Main()->String?{
         return Array(buffer)
     }
     let weightO = dataWo.withUnsafeBytes { ptr -> [Int8] in
-        let count = dataWv.count / MemoryLayout<Int8>.size
+        let count = dataWo.count / MemoryLayout<Int8>.size
         
         let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
         return Array(buffer)
     }
+    let weightUp = dataWUp.withUnsafeBytes { ptr -> [Int8] in
+        let count = dataWUp.count / MemoryLayout<Int8>.size
+        
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
+        return Array(buffer)
+    }
+    //let up = metal.makeBuffer(bytes: weightUp, length: weightUp.count * MemoryLayout<Float>.size)!
+    let weightDown = dataWDown.withUnsafeBytes { ptr -> [Int8] in
+        let count = dataWDown.count / MemoryLayout<Int8>.size
+        
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
+        return Array(buffer)
+    }
+    //let down = metal.makeBuffer(bytes: weightDown, length: weightDown.count * MemoryLayout<Float>.size)!
+    let weightGate = dataWGate.withUnsafeBytes { ptr -> [Int8] in
+        let count = dataWGate.count / MemoryLayout<Int8>.size
+        
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
+        return Array(buffer)
+    }
+    //let gate = metal.makeBuffer(bytes: weightGate, length: weightGate.count * MemoryLayout<Float>.size)!
+    let weightRMS = dataWRMS.withUnsafeBytes { ptr -> [Int8] in
+        let count = dataWRMS.count / MemoryLayout<Int8>.size
+        
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Int8.self).baseAddress, count: count)
+        return Array(buffer)
+    }
+    let RMS = metal.makeBuffer(bytes: weightRMS, length: weightRMS.count * MemoryLayout<Float>.size)!
+    
     // embeddings hardcode infos
     let linesEmbeddings = 128256
     var colsEmbeddings = 2560
@@ -123,7 +167,7 @@ func Main()->String?{
 
     // buffer creation
 
-    let embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
+    var embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
 
     let embeddingsResponseBuffer = metal.makeBuffer(length: (colsEmbeddings * MemoryLayout<Float>.size) * tokens.count, options: .storageModeShared)!
     let tokensInput = metal.makeBuffer(bytes: tokens, length: tokens.count * MemoryLayout<UInt32>.size, options: .storageModeShared)!
@@ -142,22 +186,10 @@ func Main()->String?{
     encoderEmbeddings.dispatchThreads(embeddingsGridSize, threadsPerThreadgroup: embeddingsThreadGroupSize)
     encoderEmbeddings.endEncoding()
 
-
-
-    // rmsNorm
-    let pipelineRms = try! metal.makeComputePipelineState(function: kernelFunctionRmsNorm)
-    let encoderRms = commandBuffer.makeComputeCommandEncoder()!
-    encoderRms.setComputePipelineState(pipelineRms);
-
-    encoderRms.setBuffer(embeddingsResponseBuffer, offset: 0, index: 11);
-    encoderRms.setBuffer(bufferNbColsEmbeddings, offset: 0, index: 12)
-
-    let RmsGridSize = MTLSize(width: tokens.count, height: 1, depth: 1)
-    let RmsThreadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
-
-    encoderRms.dispatchThreads(RmsGridSize, threadsPerThreadgroup: RmsThreadGroupSize)
-    encoderRms.endEncoding()
-
+    //apply rms norm
+    
+    embeddingsBuffer = ApplyRmsNorm(entry: embeddingsBuffer, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer)!
+    
     //mult
     let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
     //q
@@ -197,6 +229,21 @@ func Main()->String?{
     let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
 
     let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, input: contextBuffer, commandBuffer: commandBuffer)
+    
+    //add
+    let  addResult = AddArray(mat1: embeddingsResponseBuffer, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: commandBuffer)
+    
+    // apply rms norm
+    let rmsNormResult = ApplyRmsNorm(entry: addResult, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer)!
+    
+    //mult by Gate & Up
+    let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+    
+    let weightsSize = matrixInfos(nbLine : 2560, nbColumn : 6912)
+    
+    let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, input: rmsNormResult, commandBuffer: commandBuffer)
+    
+    let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, input: rmsNormResult, commandBuffer: commandBuffer)
 
     // Start
 
@@ -232,6 +279,12 @@ func Main()->String?{
     
     let Attention = GetFromBuffer(buffer: bufferAttentionOutput, size:  tokens.count * 20 * 128)
     
+    let add = GetFromBuffer(buffer: addResult, size:  tokens.count * 20 * 128)
+    
+    let uptab = GetFromBuffer(buffer: upResult, size:  tokens.count * 20 * 128)
+    
+    let gatetab = GetFromBuffer(buffer: gateResult, size:  tokens.count * 20 * 128)
+    
     
     print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
     
@@ -245,7 +298,63 @@ func Main()->String?{
     
     print("Here result attention :\n \(Attention[0..<10])")
     
+    print("Here result add :\n \(add[0..<10])")
+    
+    print("Here result up :\n \(uptab[0..<10])")
+    
+    print("Here result tab :\n \(gatetab[0..<10])")
+    
     return("ok")
+}
+func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, tokenCount : Int, commandBuffer: MTLCommandBuffer)->MTLBuffer?{
+    guard let entry, let weightRMS else {
+        return nil
+    }
+    // rmsNorm
+    let pipelineRms = try! metal.makeComputePipelineState(function: kernelFunctionRmsNorm)
+    let encoderRms = commandBuffer.makeComputeCommandEncoder()!
+    encoderRms.setComputePipelineState(pipelineRms);
+    
+    let bufferAnswer = metal.makeBuffer(length: tokenCount * sizeEntry * MemoryLayout<Float>.size, options: .storageModeShared)!
+    
+    var sizeEntry : UInt32 = UInt32(sizeEntry)
+    
+    let bufferEntrySize = metal.makeBuffer(bytes: &sizeEntry,length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+
+    
+    encoderRms.setBuffer(entry, offset: 0, index: 1);
+    encoderRms.setBuffer(bufferEntrySize, offset: 0, index: 2)
+    encoderRms.setBuffer(weightRMS, offset: 0, index: 3)
+    encoderRms.setBuffer(bufferAnswer, offset: 0, index: 4)
+
+    let RmsGridSize = MTLSize(width: tokenCount, height: 1, depth: 1)
+    let RmsThreadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
+
+    encoderRms.dispatchThreads(RmsGridSize, threadsPerThreadgroup: RmsThreadGroupSize)
+    encoderRms.endEncoding()
+    
+    return entry
+}
+func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLCommandBuffer)->MTLBuffer?{
+    guard let mat1, let mat2 else {
+        return nil
+    }
+    let pipeline = try! metal.makeComputePipelineState(function: kernelFunctionAddArrays)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    
+    
+    encoder.setBuffer(mat1, offset: 0, index: 0)
+    encoder.setBuffer(mat2, offset: 0, index: 1)
+    
+    let gridSize = MTLSize(width: size, height: 1, depth: 1)
+    
+    let threadGroup = MTLSize(width: 32, height: 1, depth: 1)
+    
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroup)
+    encoder.endEncoding()
+    
+    return mat1
 }
 func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBuffer: MTLCommandBuffer) -> MTLBuffer? {
     guard let mat, let v else {
@@ -262,7 +371,7 @@ func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBu
     let embedDim = nbHeads * headDim
     let outputSize = nbTokens * embedDim * MemoryLayout<Float>.size
     
-    guard let bufferOutput = metal.makeBuffer(length: outputSize, options: .storageModeShared) else { return nil }
+    let bufferOutput = metal.makeBuffer(length: outputSize, options: .storageModeShared)!
     
     var tokens32 = Int32(nbTokens)
     var heads32 = Int32(nbHeads)
@@ -465,6 +574,10 @@ func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
 }
 
 func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input : MTLBuffer?, commandBuffer: MTLCommandBuffer) -> MTLBuffer?{
+    
+    // TODO :
+    // weight [Int8] -> MTLBuffer?
+    
     guard let input = input else {
         return nil
     }
