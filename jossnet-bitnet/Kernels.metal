@@ -67,15 +67,24 @@ kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
     }
 }
 kernel void RoPE(device float* matrix [[ buffer(0) ]],
-                 device const int* nbcols [[ buffer(1) ]],
+                 device const uint* dim_ptr [[ buffer(1) ]],
                  uint2 gid [[ thread_position_in_grid ]]){
-    int index = (gid.y * *nbcols) + (gid.x * 2);
-    float angle = gid.y * (1/ pow(10000.0, (gid.x % 64) * 2 / 128.0) );
     
+    if (gid.y * 2 >= *dim_ptr) return;
+
+    uint index = (gid.x * *dim_ptr) + (gid.y * 2);
+    
+    uint feature_in_head = gid.y % 64;
+
+    float position = (float)gid.x;
+    float denominator = pow(10000.0f, ((float)feature_in_head * 2.0f) / 128.0f);
+    float angle = position * (1.0f / denominator);
+    
+
     float temp = matrix[index];
     
-    matrix[index] = matrix[index]  * cos(angle) - matrix[index + 1]  * sin(angle);
-    matrix[index+1] = temp  * sin(angle) + matrix[index + 1]  * cos(angle);
+    matrix[index]   = matrix[index] * cos(angle) - matrix[index + 1] * sin(angle);
+    matrix[index+1] = temp * sin(angle) + matrix[index + 1] * cos(angle);
 }
 kernel void AttentionScore(device const float* Q [[ buffer(0) ]],
                            device const float* K [[ buffer(1) ]],

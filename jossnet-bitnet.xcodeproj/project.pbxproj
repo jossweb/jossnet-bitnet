@@ -77,9 +77,6 @@
 			);
 			name = "jossnet-bitnet";
 			packageProductDependencies = (
-				C8F48FEA2F3292E800A5CAF6 /* Hub */,
-				C8F48FEC2F3292E800A5CAF6 /* Tokenizers */,
-				C8F48FEE2F3292E800A5CAF6 /* Transformers */,
 			);
 			productName = "jossnet-bitnet";
 			productReference = C8F48FE42F32923D00A5CAF6 /* jossnet-bitnet */;
@@ -110,7 +107,6 @@
 			mainGroup = C8B0964A2F2E6AB900CD29A1;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				C8F48FE92F3292E800A5CAF6 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C8B0964A2F2E6AB900CD29A1;
@@ -256,6 +252,7 @@
 		C8B0965B2F2E6AB900CD29A1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 5K6HXFTJJS;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -270,6 +267,7 @@
 		C8B0965C2F2E6AB900CD29A1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 5K6HXFTJJS;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -303,35 +301,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		C8F48FE92F3292E800A5CAF6 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/huggingface/swift-transformers";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.6;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		C8F48FEA2F3292E800A5CAF6 /* Hub */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C8F48FE92F3292E800A5CAF6 /* XCRemoteSwiftPackageReference "swift-transformers" */;
-			productName = Hub;
-		};
-		C8F48FEC2F3292E800A5CAF6 /* Tokenizers */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C8F48FE92F3292E800A5CAF6 /* XCRemoteSwiftPackageReference "swift-transformers" */;
-			productName = Tokenizers;
-		};
-		C8F48FEE2F3292E800A5CAF6 /* Transformers */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = C8F48FE92F3292E800A5CAF6 /* XCRemoteSwiftPackageReference "swift-transformers" */;
-			productName = Transformers;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C8B0964B2F2E6AB900CD29A1 /* Project object */;
 }
