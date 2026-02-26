@@ -212,3 +212,21 @@ kernel void siluAndMul(device float* Gate [[ buffer(0) ]],
 {
     Gate[id] = (Gate[id] * 1.0f / (1.0f + exp(-Gate[id]))) * Up[id];
 }
+kernel void computeLogits(device const float* final_vectors [[ buffer(0) ]],
+                          device const float* embeddings [[ buffer(1) ]],
+                          device float* logits [[ buffer(2) ]],
+                          device const uint* hidden_dim [[ buffer(3) ]],
+                          device const uint* last_token_index [[ buffer(4) ]],
+                          uint id [[ thread_position_in_grid ]]) {
+    
+    uint vocab_size = 128256;
+    float score = 0;
+    if (id >= vocab_size) return;
+    
+    uint dim = *hidden_dim;
+    uint offset = (*last_token_index) * dim;
+    for(uint i = 0; i < dim; i++) {
+        score += final_vectors[offset + i] * embeddings[id * dim + i];
+    }
+    logits[id] = score;
+}

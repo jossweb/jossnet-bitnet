@@ -15,7 +15,38 @@ let urlDown = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/we
 let urlUp = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_up.bin")
 let urlGate = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_gate.bin")
 let urlEmbeddings = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/embeddings.bin")
+let urlRMSFinal = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_RMS_final.bin")
 
+func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: Int, dim: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
+    guard let finalVectors = finalVectors, let embeddings = embeddings else { return nil }
+    
+    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    
+    let vocabSize = 128256
+    let logitsBuffer = metal.makeBuffer(length: vocabSize * MemoryLayout<Float>.size, options: .storageModeShared)!
+    
+    var dim32 = UInt32(dim)
+    var lastTokenIdx = UInt32(nbTokens - 1)
+    
+    let bufferDim = metal.makeBuffer(bytes: &dim32, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    let bufferLastIdx = metal.makeBuffer(bytes: &lastTokenIdx, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    
+    encoder.setBuffer(finalVectors, offset: 0, index: 0)
+    encoder.setBuffer(embeddings, offset: 0, index: 1)
+    encoder.setBuffer(logitsBuffer, offset: 0, index: 2)
+    encoder.setBuffer(bufferDim, offset: 0, index: 3)
+    encoder.setBuffer(bufferLastIdx, offset: 0, index: 4)
+    
+    let gridSize = MTLSize(width: vocabSize, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return logitsBuffer
+}
 func Embedding(tokens: [UInt32], colsEmbeddings : Int, embeddingsBuffer: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction : MTLFunction )->MTLBuffer?{
     
     guard let embeddingsBuffer else { return nil}

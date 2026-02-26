@@ -62,6 +62,9 @@ guard let kernelFunctionAddArrays = library.makeFunction(name: "addArrays") else
 guard let kernelFunctionSiluAndMul = library.makeFunction(name: "siluAndMul") else {
     fatalError("Error : Function siluAndMul is not available")
 }
+guard let kernelFunctionComputeLogits = library.makeFunction(name: "computeLogits") else {
+    fatalError("Error : Function computeLogits is not available")
+}
 
 print(Main()!)
 
@@ -74,7 +77,8 @@ func Main()->String?{
     var dataWUp : Data
     var dataWDown : Data
     var dataWGate : Data
-    var dateEmbeddings : Data
+    var dataEmbeddings : Data
+    var dataRMSFinal : Data
     do{
         dataW = try Data(contentsOf: urlW)
         dataWk = try Data(contentsOf: urlWk)
@@ -84,7 +88,8 @@ func Main()->String?{
         dataWUp = try Data(contentsOf: urlUp)
         dataWDown = try Data(contentsOf: urlDown)
         dataWGate = try Data(contentsOf: urlGate)
-        dateEmbeddings = try Data(contentsOf: urlEmbeddings)
+        dataEmbeddings = try Data(contentsOf: urlEmbeddings)
+        dataRMSFinal = try Data(contentsOf: urlRMSFinal)
     }catch{
         return "Error : can't load the weights"
     }
@@ -144,93 +149,110 @@ func Main()->String?{
     let linesEmbeddings = 128256
     let colsEmbeddings = 2560
     
-    let embeddings = dateEmbeddings.withUnsafeBytes {
-        ptr in
-        Array(UnsafeBufferPointer(start: ptr.bindMemory(to: Float.self).baseAddress, count: linesEmbeddings * colsEmbeddings))
+    let rmsFinal = dataRMSFinal.withUnsafeBytes {ptr in
+        let count = dataRMSFinal.count / MemoryLayout<Float>.size
+        let buffer = UnsafeBufferPointer(start: ptr.bindMemory(to: Float.self).baseAddress, count: count)
+        return Array(buffer)
     }
-    let embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
+    let rmsFinalBuffer = metal.makeBuffer(bytes: rmsFinal, length: rmsFinal.count * MemoryLayout<Float>.size)!
 
     // prompt
     let prompt = "Hi, my name is Jossua!"
     let tokens = formatString(str : prompt)
     print("IDs : \(tokens)")
+    let embeddings = dataEmbeddings.withUnsafeBytes {
+        ptr in
+        Array(UnsafeBufferPointer(start: ptr.bindMemory(to: Float.self).baseAddress, count: linesEmbeddings * colsEmbeddings))
+    }
+    let embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
 
     //embeddings
 
-    guard var embeddingsResponseBuffer = Embedding(tokens: tokens, colsEmbeddings: colsEmbeddings, embeddingsBuffer: embeddingsBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionGetFromEmbedding) else{
+    guard let embeddingsResponseBuffer = Embedding(tokens: tokens, colsEmbeddings: colsEmbeddings, embeddingsBuffer: embeddingsBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionGetFromEmbedding) else{
         return nil
     }
 
+    var currentHiddenState : MTLBuffer? = embeddingsResponseBuffer
+    
 
-    //apply rms norm
-    
-    embeddingsResponseBuffer = ApplyRmsNorm(entry: embeddingsResponseBuffer, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
-    
-    //mult
-    let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
-    //q
-    let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
-    var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: embeddingsResponseBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    //k
-    let wKSize = matrixInfos(nbLine : 640, nbColumn : 640)
-    var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, input: embeddingsResponseBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    //v
-    let wVSize = matrixInfos(nbLine : 640, nbColumn : 640)
-    let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, input: embeddingsResponseBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    // RoPE
-    bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbColumn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+    for _ in 0..<26{
         
-    bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbColumn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+        autoreleasepool {
+            
+            let normalizedAttn = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+            
+            //mult
+            let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
+            //q
+            let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
+            var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weight, input: normalizedAttn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            //k
+            let wKSize = matrixInfos(nbLine : 640, nbColumn : 640)
+            var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, input: normalizedAttn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            //v
+            let wVSize = matrixInfos(nbLine : 640, nbColumn : 640)
+            let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, input: normalizedAttn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            // RoPE
+            bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbColumn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+            
+            bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbColumn, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+            
+            // Attention score
+            
+            var resultAttention = AttentionScore(buffer1: bufferQ, buffer2: bufferK, nbToken: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAttentionScore)
+            
+            
+            let totalAttentionRows = 20 * tokens.count
+            let attentionWidth = tokens.count
+            
+            resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionSubstractMax, getMaxFunction: kernelFunctionSearchMaxVector)
+            
+            resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionDivideBySum, getSumFunction: kernelFunctionSumVector)
+            
+            //context
+            let contextBuffer = ComputeWeightedSum(mat: resultAttention, v: bufferV, nbTokens: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionWeightedSum)
+            
+            // mult by o
+            let wOSize = matrixInfos(nbLine: 2560, nbColumn: 2560)
+            let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+            
+            let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, input: contextBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            //add
+            let addResult = AddArray(mat1: currentHiddenState, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
+            
+            // apply rms norm
+            let rmsNormResult = ApplyRmsNorm(entry: addResult, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+            
+            //mult by Gate & Up
+            let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+            
+            let weightsSize = matrixInfos(nbLine : 2560, nbColumn : 6912)
+            
+            let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, input: rmsNormResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, input: rmsNormResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            let sizeIntermediaire = tokens.count * 6912
+            ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionSiluAndMul)
+            
+            let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
+            let weightsSizeDown = matrixInfos(nbLine: 6912, nbColumn: 2560)
+            
+            let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, input: gateResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+            
+            currentHiddenState = AddArray(mat1: addResult, mat2: downResult, size: tokens.count * 2560, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
+            
+        }
+    }
     
-    // Attention score
-    
-    var resultAttention = AttentionScore(buffer1: bufferQ, buffer2: bufferK, nbToken: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAttentionScore)
-    
+    let resultFinalRms = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: rmsFinalBuffer, tokenCount: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)
 
-    let totalAttentionRows = 20 * tokens.count
-    let attentionWidth = tokens.count
-        
-    resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionSubstractMax, getMaxFunction: kernelFunctionSearchMaxVector)
-        
-    resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionDivideBySum, getSumFunction: kernelFunctionSumVector)
+    let logitsBuffer = ComputeLogits(finalVectors: resultFinalRms, embeddings: embeddingsBuffer, nbTokens: tokens.count, dim: colsEmbeddings, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionComputeLogits)
     
-    //context
-    let contextBuffer = ComputeWeightedSum(mat: resultAttention, v: bufferV, nbTokens: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionWeightedSum)
-    
-    // mult by o
-    let wOSize = matrixInfos(nbLine: 2560, nbColumn: 2560)
-    let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
-
-    let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, input: contextBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    //add
-    let addResult = AddArray(mat1: embeddingsResponseBuffer, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
-    
-    // apply rms norm
-    let rmsNormResult = ApplyRmsNorm(entry: addResult, sizeEntry: colsEmbeddings, weightRMS: RMS, tokenCount: tokens.count, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
-    
-    //mult by Gate & Up
-    let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
-    
-    let weightsSize = matrixInfos(nbLine : 2560, nbColumn : 6912)
-    
-    let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, input: rmsNormResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, input: rmsNormResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    
-    let sizeIntermediaire = tokens.count * 6912
-    ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionSiluAndMul)
-    
-    let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
-    let weightsSizeDown = matrixInfos(nbLine: 6912, nbColumn: 2560)
-    
-    let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, input: gateResult, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-    _ = AddArray(mat1: addResult, mat2: downResult, size: tokens.count * 2560, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
-
-
     // Start
 
     commandBuffer.commit()
@@ -253,7 +275,7 @@ func Main()->String?{
         print("Valeur Token 1 [0] : \(resultArray[stride])")
     }
 
-    let resultArrayMultQ = GetFromBuffer(buffer: bufferQ, size: (Int(colsEmbeddings) * tokens.count))
+    /*let resultArrayMultQ = GetFromBuffer(buffer: bufferQ, size: (Int(colsEmbeddings) * tokens.count))
     
     let resultArrayMultV = GetFromBuffer(buffer: bufferV, size: (640 * tokens.count))
     
@@ -273,8 +295,22 @@ func Main()->String?{
 
     let layer0Output = GetFromBuffer(buffer: addResult, size: 10)
     
+    let testresultFinalRms = GetFromBuffer(buffer: resultFinalRms, size: 10)*/
     
-    print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
+    let logitsArray = GetFromBuffer(buffer: logitsBuffer, size: 128256)
+    
+    var bestScore: Float = -Float.greatestFiniteMagnitude
+    var bestTokenID = 0
+    
+    for i in 0..<logitsArray.count {
+        if logitsArray[i] > bestScore {
+            bestScore = logitsArray[i]
+            bestTokenID = i
+        }
+    }
+    
+    
+    /*print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
     
     print("Here result mult V :\n \(resultArrayMultV[0..<10])")
     
@@ -294,5 +330,10 @@ func Main()->String?{
     
     print("Exit : \n \(layer0Output[0..<10])")
     
+    print("FINAL RMS : \n \(testresultFinalRms[0..<10])")*/
+    
+    print("result")
+    print("exit token : \(bestTokenID)")
+    print("Score : \(bestScore)")
     return("ok")
 }
