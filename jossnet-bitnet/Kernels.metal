@@ -15,6 +15,7 @@ kernel void mult(device const float* X [[ buffer(0) ]],
                  device const uint& nbColW [[ buffer(4) ]],
                  device const uint& nbLineW [[ buffer(5) ]],
                  device float* answer [[ buffer(6) ]],
+                 device const float* scale_ptr [[ buffer(7) ]],
                  uint2 gid [[ thread_position_in_grid ]]){
     
     
@@ -30,7 +31,8 @@ kernel void mult(device const float* X [[ buffer(0) ]],
         sum += X[indexX] * W[index_W];
     }
     uint index_Answer = gid.y * nbLineW + gid.x;
-    answer[index_Answer] = sum;
+    
+    answer[index_Answer] = sum * scale_ptr[0];
 }
 kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
                              device float* answer [[ buffer(8) ]],

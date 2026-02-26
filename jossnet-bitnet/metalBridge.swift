@@ -356,12 +356,12 @@ func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
     return Array(bufferPointer)
 }
 
-func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input : MTLBuffer?, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer?{
+func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], scale: MTLBuffer?, input : MTLBuffer?, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer?{
     
     // TODO :
     // weight [Int8] -> MTLBuffer?
     
-    guard let input = input else {
+    guard let input, let scale else {
         return nil
     }
     var nbLineW = UInt32(WSize.nbLine)
@@ -393,6 +393,7 @@ func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], input 
     encoderMult.setBuffer(bufferNbLineX, offset: 0, index: 3)
     encoderMult.setBuffer(bufferNbColW, offset: 0, index: 4)
     encoderMult.setBuffer(bufferNbLineW, offset: 0, index: 5)
+    encoderMult.setBuffer(scale, offset: 0, index: 7)
 
     let MultGridSize = MTLSize(width: WSize.nbLine, height: inputSize.nbLine, depth: 1)
     let MultThreadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
