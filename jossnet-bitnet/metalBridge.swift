@@ -101,13 +101,13 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     
     let bufferAnswer = metal.makeBuffer(length: tokenCount * sizeEntry * MemoryLayout<Float>.size, options: .storageModeShared)!
     
-    var sizeEntry : UInt32 = UInt32(sizeEntry)
     
-    let bufferEntrySize = metal.makeBuffer(bytes: &sizeEntry,length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
+    var cols = UInt32(sizeEntry)
+    
 
     
     encoderRms.setBuffer(entry, offset: 0, index: 1);
-    encoderRms.setBuffer(bufferEntrySize, offset: 0, index: 2)
+    encoderRms.setBytes(&cols, length: MemoryLayout<UInt32>.size, index: 2)
     encoderRms.setBuffer(weightRMS, offset: 0, index: 3)
     encoderRms.setBuffer(bufferAnswer, offset: 0, index: 4)
 
@@ -198,7 +198,7 @@ func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : M
     encoder.setBuffer(bufferSumValues, offset: 0, index: 2)
     
     let gridSize = MTLSize(width: nbcols, height: nbToken, depth: 1)
-    let threadGroupSize = MTLSize(width: 32, height: 32, depth: 1)
+    let threadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
 
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()
@@ -227,7 +227,7 @@ func SubstractMax(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : 
     encoder.setBuffer(bufferMaxValues, offset: 0, index: 2)
     
     let gridSize = MTLSize(width: nbcols, height: nbToken, depth: 1)
-    let threadGroupSize = MTLSize(width: 32, height: 32, depth: 1)
+    let threadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
 
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()
@@ -254,7 +254,7 @@ func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer 
     encoder.setBuffer(bufferSumValues, offset: 0, index: 2)
     
     let gridSize = MTLSize(width: nbToken, height: 1, depth: 1)
-    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
 
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()

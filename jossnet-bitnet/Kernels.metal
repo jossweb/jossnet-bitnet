@@ -47,25 +47,24 @@ kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
 }
 
 kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
-                    device const uint* nbCols [[ buffer(2) ]],
+                    constant uint& nbCols [[ buffer(2) ]],
                     device const float* weight [[ buffer(3) ]],
                     device float* answer [[ buffer(4) ]],
                     uint2 gid [[ thread_position_in_grid ]]){
     
-    uint startingIndex = gid.x * *nbCols;
+    uint startingIndex = gid.x * nbCols;
 
     float powSum = 0;
-    for(uint i = 0; i < *nbCols; i++){
+    for(uint i = 0; i < nbCols; i++){
         float val = vecList[startingIndex + i];
         powSum += val * val;
     }
+
+    float meanSquare = powSum / (float)(nbCols);
     
-    if(powSum != 0){
-        float meanSquare = powSum / (float)(*nbCols);
-        float coeff = sqrt(meanSquare + 1e-5);
-        for(uint i = 0; i < *nbCols; i++){
-            answer[startingIndex + i] = (vecList[startingIndex + i] / coeff) * weight[i];
-        }
+    float inv_coeff = rsqrt(meanSquare + 1e-5f);
+    for(uint i = 0; i < nbCols; i++){
+        answer[startingIndex + i] = (vecList[startingIndex + i] * inv_coeff) * weight[i];
     }
 }
 kernel void RoPE(device float* matrix [[ buffer(0) ]],

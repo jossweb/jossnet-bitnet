@@ -105,7 +105,7 @@ func Main()->String?{
     let rmsFinalBuffer = metal.makeBuffer(bytes: rmsFinal, length: rmsFinal.count * MemoryLayout<Float>.size)!
 
     // prompt
-    let prompt = "Hi, my name is Jossua!"
+    let prompt = "Hi"
     let tokens = formatString(str : prompt)
     print("IDs : \(tokens)")
     let embeddings = dataEmbeddings.withUnsafeBytes {
@@ -125,6 +125,9 @@ func Main()->String?{
     commandBuffer.commit()
     commandBuffer.waitUntilCompleted()
 
+    let embedArray = GetFromBuffer(buffer: currentHiddenState, size: 5)
+        print("--- 1. EMBEDDINGS SWIFT ---")
+        print(embedArray)
 
     for layerIndex in 0..<26{
         
@@ -132,7 +135,7 @@ func Main()->String?{
             let layerCommandBuffer = queue.makeCommandBuffer()!
             //import .bin
             let layerDir = "/Users/jossua/Documents/jossnet-bitnet/py/layers/layer_\(layerIndex)/"
-                        
+            
             let weightQ = loadInt8Matrix(path: layerDir + "W_q.bin")
             let weightK = loadInt8Matrix(path: layerDir + "W_k.bin")
             let weightV = loadInt8Matrix(path: layerDir + "W_v.bin")
@@ -175,17 +178,17 @@ func Main()->String?{
             var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weightQ, scale: bufferScaleQ, input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
             //k
-            let wKSize = matrixInfos(nbLine : 640, nbColumn : 640)
+            let wKSize = matrixInfos(nbLine : 640, nbColumn : 2560)
             var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, scale: bufferScaleK ,input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
             //v
-            let wVSize = matrixInfos(nbLine : 640, nbColumn : 640)
+            let wVSize = matrixInfos(nbLine : 640, nbColumn : 2560)
             let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, scale: bufferScaleV,input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
             // RoPE
-            bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbColumn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+            bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
             
-            bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbColumn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+            bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
             
             // Attention score
             
@@ -217,7 +220,7 @@ func Main()->String?{
             //mult by Gate & Up
             let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
             
-            let weightsSize = matrixInfos(nbLine : 2560, nbColumn : 6912)
+            let weightsSize = matrixInfos(nbLine : 6912, nbColumn : 2560)
             
             let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, scale: bufferScaleGate, input: rmsNormResult, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
@@ -227,7 +230,7 @@ func Main()->String?{
             ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionSiluAndMul)
             
             let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
-            let weightsSizeDown = matrixInfos(nbLine: 6912, nbColumn: 2560)
+            let weightsSizeDown = matrixInfos(nbLine: 2560, nbColumn: 6912)
             
             let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, scale: bufferScaleDown, input: gateResult, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
@@ -236,6 +239,17 @@ func Main()->String?{
             layerCommandBuffer.commit()
             layerCommandBuffer.waitUntilCompleted()
             
+            //test joss !!!!!!!!
+                        
+            if layerIndex == 0 {
+            let normArray = GetFromBuffer(buffer: normalizedAttn, size: 5)
+            print("RMS")
+            print(normArray)
+            
+            let outArray = GetFromBuffer(buffer: currentHiddenState, size: 5)
+            print("Layout 0")
+            print(outArray)
+            }
         }
     }
     
