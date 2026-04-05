@@ -6,17 +6,19 @@
 //
 import Metal
 
-let urlW = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_q.bin")
-let urlWk = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_k.bin")
-let urlWv = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_v.bin")
-let urlWo = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_o.bin")
-let urlRMS = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_RMS_mlp.bin")
-let urlDown = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_down.bin")
-let urlUp = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_up.bin")
-let urlGate = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_gate.bin")
-let urlEmbeddings = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/embeddings.bin")
-let urlLMHead = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_lm_head.bin")
-let urlRMSFinal = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_RMS_final.bin")
+
+
+let urlW = path.appendingPathComponent("weights_W_q.bin")
+let urlWk = path.appendingPathComponent("weights_W_k.bin")
+let urlWv = path.appendingPathComponent("weights_W_v.bin")
+let urlWo = path.appendingPathComponent("weights_W_o.bin")
+let urlRMS = path.appendingPathComponent("weights_RMS_mlp.bin")
+let urlDown = path.appendingPathComponent("weights_W_down.bin")
+let urlUp = path.appendingPathComponent("weights_W_up.bin")
+let urlGate = path.appendingPathComponent("weights_W_gate.bin")
+let urlEmbeddings = path.appendingPathComponent("embeddings.bin")
+let urlLMHead = path.appendingPathComponent("weights_lm_head.bin")
+let urlRMSFinal = path.appendingPathComponent("weights_RMS_final.bin")
 
 
 func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> (quantized: MTLBuffer, scales: MTLBuffer)? {

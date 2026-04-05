@@ -8,6 +8,8 @@
 import Foundation
 import Metal
 
+let path = URL(fileURLWithPath: "/Users/jossua/Desktop/jossnet-bitnet-resources/")
+
 struct matrixInfos{
     let nbLine : Int
     let nbColumn : Int
@@ -36,9 +38,6 @@ guard let metal = MTLCreateSystemDefaultDevice() else
 let queue = metal.makeCommandQueue()!
 
 let library = metal.makeDefaultLibrary()!
-
-//let commandBuffer = queue.makeCommandBuffer()!
-//let finalCommandBuffer = queue.makeCommandBuffer()!
 
 guard let kernelFunctionMult = library.makeFunction(name: "mult") else {
     fatalError("Error : Function mult is not available")
@@ -130,6 +129,8 @@ func Main()->String?{
     print("Generating ...")
     
     for no_prediction in 0..<10{
+        let start = CFAbsoluteTimeGetCurrent()
+        
         //embeddings
 
         let embCommandBuffer = queue.makeCommandBuffer()!
@@ -148,27 +149,27 @@ func Main()->String?{
             
             autoreleasepool {
                 let layerCommandBuffer = queue.makeCommandBuffer()!
-                let layerDir = "/Users/jossua/Documents/jossnet-bitnet/py/layers/layer_\(layerIndex)/"
+                let layerDir = path.appendingPathComponent("/layers/layer_\(layerIndex)/")
                 
-                let weightQ = loadInt8Matrix(path: layerDir + "W_q.bin")
-                let weightK = loadInt8Matrix(path: layerDir + "W_k.bin")
-                let weightV = loadInt8Matrix(path: layerDir + "W_v.bin")
-                let weightO = loadInt8Matrix(path: layerDir + "W_o.bin")
-                let weightGate = loadInt8Matrix(path: layerDir + "W_gate.bin")
-                let weightUp = loadInt8Matrix(path: layerDir + "W_up.bin")
-                let weightDown = loadInt8Matrix(path: layerDir + "W_down.bin")
-                let rmsInput = loadFloatMatrix(path: layerDir + "RMS_input.bin")
-                let rmsAttnSub = loadFloatMatrix(path: layerDir + "RMS_attn.bin")
-                let rmsPostAttn = loadFloatMatrix(path: layerDir + "RMS_post_attn.bin")
-                let rmsMlpSub = loadFloatMatrix(path: layerDir + "RMS_mlp_sub.bin")
-                let scaleQ = loadFloatMatrix(path: layerDir + "Scale_q.bin")
+                let weightQ = loadInt8Matrix(path: layerDir.appendingPathComponent("W_q.bin").path)
+                let weightK = loadInt8Matrix(path: layerDir.appendingPathComponent("W_k.bin").path)
+                let weightV = loadInt8Matrix(path: layerDir.appendingPathComponent("W_v.bin").path)
+                let weightO = loadInt8Matrix(path: layerDir.appendingPathComponent("W_o.bin").path)
+                let weightGate = loadInt8Matrix(path: layerDir.appendingPathComponent("W_gate.bin").path)
+                let weightUp = loadInt8Matrix(path: layerDir.appendingPathComponent("W_up.bin").path)
+                let weightDown = loadInt8Matrix(path: layerDir.appendingPathComponent("W_down.bin").path)
+                let rmsInput = loadFloatMatrix(path: layerDir.appendingPathComponent("RMS_input.bin").path)
+                let rmsAttnSub = loadFloatMatrix(path: layerDir.appendingPathComponent("RMS_attn.bin").path)
+                let rmsPostAttn = loadFloatMatrix(path: layerDir.appendingPathComponent("RMS_post_attn.bin").path)
+                let rmsMlpSub = loadFloatMatrix(path: layerDir.appendingPathComponent("RMS_mlp_sub.bin").path)
+                let scaleQ = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_q.bin").path)
 
-                let scaleK = loadFloatMatrix(path: layerDir + "Scale_k.bin")
-                let scaleO = loadFloatMatrix(path: layerDir + "Scale_o.bin")
-                let scaleV = loadFloatMatrix(path: layerDir + "Scale_v.bin")
-                let scaleUp = loadFloatMatrix(path: layerDir + "Scale_up.bin")
-                let scaleDown = loadFloatMatrix(path: layerDir + "Scale_down.bin")
-                let scaleGate = loadFloatMatrix(path: layerDir + "Scale_gate.bin")
+                let scaleK = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_k.bin").path)
+                let scaleO = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_o.bin").path)
+                let scaleV = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_v.bin").path)
+                let scaleUp = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_up.bin").path)
+                let scaleDown = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_down.bin").path)
+                let scaleGate = loadFloatMatrix(path: layerDir.appendingPathComponent("Scale_gate.bin").path)
                 
                 // create buffers
                 
@@ -292,6 +293,9 @@ func Main()->String?{
             }
         }
         tokens.append(UInt32(bestTokenID))
+        print("Token : \(bestTokenID)")
+        print("Temps écoulé: \(CFAbsoluteTimeGetCurrent() - start) secondes")
+
         
     }
     print("exit : \(tokens)")
