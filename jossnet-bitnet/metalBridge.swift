@@ -15,8 +15,37 @@ let urlDown = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/we
 let urlUp = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_up.bin")
 let urlGate = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_W_gate.bin")
 let urlEmbeddings = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/embeddings.bin")
+let urlLMHead = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_lm_head.bin")
 let urlRMSFinal = URL(fileURLWithPath: "/Users/jossua/Documents/jossnet-bitnet/py/weights_RMS_final.bin")
 
+
+func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> (quantized: MTLBuffer, scales: MTLBuffer)? {
+    
+    guard let entry = entry else { return nil }
+    
+    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
+    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    
+    let bufferXQuant = metal.makeBuffer(length: nbTokens * nbCols * MemoryLayout<Int8>.size, options: .storageModeShared)!
+    
+    let bufferScalesX = metal.makeBuffer(length: nbTokens * MemoryLayout<Float>.size, options: .storageModeShared)!
+    
+    var cols32 = UInt32(nbCols)
+    
+    encoder.setBuffer(entry, offset: 0, index: 0)
+    encoder.setBuffer(bufferXQuant, offset: 0, index: 1)
+    encoder.setBuffer(bufferScalesX, offset: 0, index: 2)
+    encoder.setBytes(&cols32, length: MemoryLayout<UInt32>.size, index: 3)
+    
+    let gridSize = MTLSize(width: nbTokens, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+    
+    encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
+    encoder.endEncoding()
+    
+    return (bufferXQuant, bufferScalesX)
+}
 func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: Int, dim: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
     guard let finalVectors = finalVectors, let embeddings = embeddings else { return nil }
     
@@ -30,14 +59,11 @@ func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: I
     var dim32 = UInt32(dim)
     var lastTokenIdx = UInt32(nbTokens - 1)
     
-    let bufferDim = metal.makeBuffer(bytes: &dim32, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-    let bufferLastIdx = metal.makeBuffer(bytes: &lastTokenIdx, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-    
     encoder.setBuffer(finalVectors, offset: 0, index: 0)
     encoder.setBuffer(embeddings, offset: 0, index: 1)
     encoder.setBuffer(logitsBuffer, offset: 0, index: 2)
-    encoder.setBuffer(bufferDim, offset: 0, index: 3)
-    encoder.setBuffer(bufferLastIdx, offset: 0, index: 4)
+    encoder.setBytes(&dim32, length: MemoryLayout<UInt32>.size, index: 3)
+    encoder.setBytes(&lastTokenIdx, length: MemoryLayout<UInt32>.size, index: 4)
     
     let gridSize = MTLSize(width: vocabSize, height: 1, depth: 1)
     let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
@@ -94,7 +120,6 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     guard let entry, let weightRMS else {
         return nil
     }
-    // rmsNorm
     let pipelineRms = try! metal.makeComputePipelineState(function: metalFunction)
     let encoderRms = commandBuffer.makeComputeCommandEncoder()!
     encoderRms.setComputePipelineState(pipelineRms);
@@ -103,8 +128,6 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     
     
     var cols = UInt32(sizeEntry)
-    
-
     
     encoderRms.setBuffer(entry, offset: 0, index: 1);
     encoderRms.setBytes(&cols, length: MemoryLayout<UInt32>.size, index: 2)
@@ -119,26 +142,25 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     
     return bufferAnswer
 }
-func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction)->MTLBuffer?{
-    guard let mat1, let mat2 else {
-        return nil
-    }
+func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
+    guard let mat1, let mat2 else { return nil }
     let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
+    let mat3 = metal.makeBuffer(length: size * MemoryLayout<Float>.size, options: .storageModeShared)!
     
     encoder.setBuffer(mat1, offset: 0, index: 0)
     encoder.setBuffer(mat2, offset: 0, index: 1)
+    encoder.setBuffer(mat3, offset: 0, index: 2) 
     
     let gridSize = MTLSize(width: size, height: 1, depth: 1)
-    
     let threadGroup = MTLSize(width: 32, height: 1, depth: 1)
     
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroup)
     encoder.endEncoding()
     
-    return mat1
+    return mat3
 }
 func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer? {
     guard let mat, let v else {
@@ -254,7 +276,7 @@ func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer 
     encoder.setBuffer(bufferSumValues, offset: 0, index: 2)
     
     let gridSize = MTLSize(width: nbToken, height: 1, depth: 1)
-    let threadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
 
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()
@@ -336,7 +358,7 @@ func ApplyRoPE(buffer : MTLBuffer?, nbTokens : Int, dim : Int, commandBuffer : M
     encoder.setBuffer(bufferDim, offset: 0, index: 1)
     
     let gridSize = MTLSize(width: nbTokens, height: dim / 2, depth: 1)
-    let threadGroupSize = MTLSize(width: 1, height: 32, depth: 1)
+    let threadGroupSize = MTLSize(width: 32, height: 32, depth: 1)
 
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()
@@ -356,47 +378,33 @@ func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
     return Array(bufferPointer)
 }
 
-func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight : [Int8], scale: MTLBuffer?, input : MTLBuffer?, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer?{
+func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight: [Int8], scaleW: MTLBuffer?, inputQuant: MTLBuffer?, scaleX: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
     
-    // TODO :
-    // weight [Int8] -> MTLBuffer?
-    
-    guard let input, let scale else {
-        return nil
-    }
-    var nbLineW = UInt32(WSize.nbLine)
-    var nbColW = UInt32(WSize.nbColumn)
-    var nbLineInput = UInt32(inputSize.nbLine)
-    var nbColInput = UInt32(inputSize.nbColumn)
+    guard let inputQuant = inputQuant, let scaleW = scaleW, let scaleX = scaleX else { return nil }
     
     let pipelineMult = try! metal.makeComputePipelineState(function: metalFunction)
     let encoderMult = commandBuffer.makeComputeCommandEncoder()!
-    encoderMult.setComputePipelineState(pipelineMult);
+    encoderMult.setComputePipelineState(pipelineMult)
     
-    // mult mat part
-    let bufferW = metal.makeBuffer(bytes: weight, length: weight.count * MemoryLayout<Int8>.size, options: .storageModeShared)!
-
-    let bufferA = metal.makeBuffer(length: Int(nbLineInput) * Int(nbLineW) * MemoryLayout<Float>.size, options: .storageModeShared)!
+    let dims: [UInt32] = [UInt32(inputSize.nbColumn), UInt32(inputSize.nbLine), UInt32(WSize.nbLine)]
+    let bufferDims = metal.makeBuffer(bytes: dims, length: dims.count * 4, options: .storageModeShared)!
     
-    memset(bufferA.contents(), 0, Int(nbLineInput) * Int(nbLineW) * MemoryLayout<Float>.size)
-
-    let bufferNbColX = metal.makeBuffer(bytes: &nbColInput, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-    let bufferNbLineX = metal.makeBuffer(bytes: &nbLineInput, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-    let bufferNbColW = metal.makeBuffer(bytes: &nbColW, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-    let bufferNbLineW = metal.makeBuffer(bytes: &nbLineW, length: MemoryLayout<UInt32>.size, options: .storageModeShared)!
-
-    encoderMult.setBuffer(input, offset: 0, index: 0);
-    encoderMult.setBuffer(bufferW, offset: 0, index: 1);
-    encoderMult.setBuffer(bufferA, offset: 0, index: 6);
-
-    encoderMult.setBuffer(bufferNbColX, offset: 0, index: 2)
-    encoderMult.setBuffer(bufferNbLineX, offset: 0, index: 3)
-    encoderMult.setBuffer(bufferNbColW, offset: 0, index: 4)
-    encoderMult.setBuffer(bufferNbLineW, offset: 0, index: 5)
-    encoderMult.setBuffer(scale, offset: 0, index: 7)
+    let bufferW = metal.makeBuffer(bytes: weight, length: weight.count, options: .storageModeShared)!
+    let bufferA = metal.makeBuffer(length: inputSize.nbLine * WSize.nbLine * 4, options: .storageModeShared)!
+    
+    encoderMult.setBuffer(inputQuant, offset: 0, index: 0)
+    encoderMult.setBuffer(bufferW, offset: 0, index: 1)
+    encoderMult.setBuffer(bufferDims, offset: 0, index: 2)
+    encoderMult.setBuffer(bufferA, offset: 0, index: 6)
+    encoderMult.setBuffer(scaleW, offset: 0, index: 7)
+    encoderMult.setBuffer(scaleX, offset: 0, index: 8)
+    
+    var scaleWSize = UInt32(scaleW.length / MemoryLayout<Float>.size)
+    encoderMult.setBytes(&scaleWSize, length: MemoryLayout<UInt32>.size, index: 9)
 
     let MultGridSize = MTLSize(width: WSize.nbLine, height: inputSize.nbLine, depth: 1)
-    let MultThreadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+    let groupWidth = min(pipelineMult.threadExecutionWidth, WSize.nbLine)
+    let MultThreadGroupSize = MTLSize(width: groupWidth, height: 1, depth: 1)
 
     encoderMult.dispatchThreads(MultGridSize, threadsPerThreadgroup: MultThreadGroupSize)
     encoderMult.endEncoding()

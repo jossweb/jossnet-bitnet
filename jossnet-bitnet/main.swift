@@ -37,8 +37,8 @@ let queue = metal.makeCommandQueue()!
 
 let library = metal.makeDefaultLibrary()!
 
-let commandBuffer = queue.makeCommandBuffer()!
-let finalCommandBuffer = queue.makeCommandBuffer()!
+//let commandBuffer = queue.makeCommandBuffer()!
+//let finalCommandBuffer = queue.makeCommandBuffer()!
 
 guard let kernelFunctionMult = library.makeFunction(name: "mult") else {
     fatalError("Error : Function mult is not available")
@@ -73,11 +73,14 @@ guard let kernelFunctionWeightedSum = library.makeFunction(name: "weightedSum") 
 guard let kernelFunctionAddArrays = library.makeFunction(name: "addArrays") else {
     fatalError("Error : Function divideBySum is not available")
 }
-guard let kernelFunctionSiluAndMul = library.makeFunction(name: "siluAndMul") else {
+guard let kernelFunctionRelu2 = library.makeFunction(name: "relu2") else {
     fatalError("Error : Function siluAndMul is not available")
 }
 guard let kernelFunctionComputeLogits = library.makeFunction(name: "computeLogits") else {
     fatalError("Error : Function computeLogits is not available")
+}
+guard let kernelFunctionQuantize = library.makeFunction(name: "quantizeActivations") else {
+    fatalError("Error : Function quantizeActivations is not available")
 }
 
 
@@ -93,6 +96,12 @@ func Main()->String?{
         return "Error : can't load the weights"
     }
     
+    let dataLMHead = try! Data(contentsOf: urlLMHead)
+    let lmHead = dataLMHead.withUnsafeBytes { ptr in
+        Array(UnsafeBufferPointer(start: ptr.bindMemory(to: Float.self).baseAddress, count: 128256 * 2560))
+    }
+    let lmHeadBuffer = metal.makeBuffer(bytes: lmHead, length: lmHead.count * MemoryLayout<Float>.size)!
+    
     // embeddings hardcode infos
     let linesEmbeddings = 128256
     let colsEmbeddings = 2560
@@ -105,239 +114,186 @@ func Main()->String?{
     let rmsFinalBuffer = metal.makeBuffer(bytes: rmsFinal, length: rmsFinal.count * MemoryLayout<Float>.size)!
 
     // prompt
-    let prompt = "Hi"
-    let tokens = formatString(str : prompt)
+    let prompt = "The capital of France is"
+    //var tokens = formatString(str : prompt)
+    var tokens: [UInt32] = [128000, 25, 578, 6864, 315, 9822, 374, 128009, 72803, 25, 220]
     print("IDs : \(tokens)")
     let embeddings = dataEmbeddings.withUnsafeBytes {
         ptr in
         Array(UnsafeBufferPointer(start: ptr.bindMemory(to: Float.self).baseAddress, count: linesEmbeddings * colsEmbeddings))
     }
     let embeddingsBuffer = metal.makeBuffer(bytes: embeddings, length: embeddings.count * MemoryLayout<Float>.size)!
-
-    //embeddings
-
-    guard let embeddingsResponseBuffer = Embedding(tokens: tokens, colsEmbeddings: colsEmbeddings, embeddingsBuffer: embeddingsBuffer, commandBuffer: commandBuffer, metal: metal, metalFunction: kernelFunctionGetFromEmbedding) else{
-        return nil
-    }
-
-    var currentHiddenState : MTLBuffer? = embeddingsResponseBuffer
     
-    commandBuffer.commit()
-    commandBuffer.waitUntilCompleted()
+    //var kCaches: [MTLBuffer?] = Array(repeating: nil, count: 26)
+    //var vCaches: [MTLBuffer?] = Array(repeating: nil, count: 26)
+    
+    print("Generating ...")
+    
+    for no_prediction in 0..<10{
+        //embeddings
 
-    let embedArray = GetFromBuffer(buffer: currentHiddenState, size: 5)
-        print("--- 1. EMBEDDINGS SWIFT ---")
-        print(embedArray)
-
-    for layerIndex in 0..<26{
+        let embCommandBuffer = queue.makeCommandBuffer()!
+        guard let embeddingsResponseBuffer = Embedding(tokens: tokens, colsEmbeddings: colsEmbeddings, embeddingsBuffer: embeddingsBuffer, commandBuffer: embCommandBuffer, metal: metal, metalFunction: kernelFunctionGetFromEmbedding) else{
+            return nil
+        }
         
-        autoreleasepool {
-            let layerCommandBuffer = queue.makeCommandBuffer()!
-            //import .bin
-            let layerDir = "/Users/jossua/Documents/jossnet-bitnet/py/layers/layer_\(layerIndex)/"
+        var currentHiddenState: MTLBuffer? = embeddingsResponseBuffer
+        
+        embCommandBuffer.commit()
+        embCommandBuffer.waitUntilCompleted()
+        
+        print("prediction \(no_prediction)")
+     
+        for layerIndex in 0..<30{
             
-            let weightQ = loadInt8Matrix(path: layerDir + "W_q.bin")
-            let weightK = loadInt8Matrix(path: layerDir + "W_k.bin")
-            let weightV = loadInt8Matrix(path: layerDir + "W_v.bin")
-            let weightO = loadInt8Matrix(path: layerDir + "W_o.bin")
-            let weightGate = loadInt8Matrix(path: layerDir + "W_gate.bin")
-            let weightUp = loadInt8Matrix(path: layerDir + "W_up.bin")
-            let weightDown = loadInt8Matrix(path: layerDir + "W_down.bin")
-            let rmsAttn = loadFloatMatrix(path: layerDir + "RMS_attn.bin")
-            let rmsMlp = loadFloatMatrix(path: layerDir + "RMS_mlp.bin")
-            let scaleQ = loadFloatMatrix(path: layerDir + "Scale_q.bin")
-            let scaleK = loadFloatMatrix(path: layerDir + "Scale_k.bin")
-            let scaleO = loadFloatMatrix(path: layerDir + "Scale_o.bin")
-            let scaleV = loadFloatMatrix(path: layerDir + "Scale_v.bin")
-            let scaleUp = loadFloatMatrix(path: layerDir + "Scale_up.bin")
-            let scaleDown = loadFloatMatrix(path: layerDir + "Scale_down.bin")
-            let scaleGate = loadFloatMatrix(path: layerDir + "Scale_gate.bin")
+            autoreleasepool {
+                let layerCommandBuffer = queue.makeCommandBuffer()!
+                let layerDir = "/Users/jossua/Documents/jossnet-bitnet/py/layers/layer_\(layerIndex)/"
+                
+                let weightQ = loadInt8Matrix(path: layerDir + "W_q.bin")
+                let weightK = loadInt8Matrix(path: layerDir + "W_k.bin")
+                let weightV = loadInt8Matrix(path: layerDir + "W_v.bin")
+                let weightO = loadInt8Matrix(path: layerDir + "W_o.bin")
+                let weightGate = loadInt8Matrix(path: layerDir + "W_gate.bin")
+                let weightUp = loadInt8Matrix(path: layerDir + "W_up.bin")
+                let weightDown = loadInt8Matrix(path: layerDir + "W_down.bin")
+                let rmsInput = loadFloatMatrix(path: layerDir + "RMS_input.bin")
+                let rmsAttnSub = loadFloatMatrix(path: layerDir + "RMS_attn.bin")
+                let rmsPostAttn = loadFloatMatrix(path: layerDir + "RMS_post_attn.bin")
+                let rmsMlpSub = loadFloatMatrix(path: layerDir + "RMS_mlp_sub.bin")
+                let scaleQ = loadFloatMatrix(path: layerDir + "Scale_q.bin")
+
+                let scaleK = loadFloatMatrix(path: layerDir + "Scale_k.bin")
+                let scaleO = loadFloatMatrix(path: layerDir + "Scale_o.bin")
+                let scaleV = loadFloatMatrix(path: layerDir + "Scale_v.bin")
+                let scaleUp = loadFloatMatrix(path: layerDir + "Scale_up.bin")
+                let scaleDown = loadFloatMatrix(path: layerDir + "Scale_down.bin")
+                let scaleGate = loadFloatMatrix(path: layerDir + "Scale_gate.bin")
+                
+                // create buffers
+                
+                let bufferRMSInput = metal.makeBuffer(bytes: rmsInput, length: rmsInput.count * 4, options: .storageModeShared)!
+                let bufferRMSAttnSub = metal.makeBuffer(bytes: rmsAttnSub, length: rmsAttnSub.count * 4, options: .storageModeShared)!
+                let bufferRMSPostAttn = metal.makeBuffer(bytes: rmsPostAttn, length: rmsPostAttn.count * 4, options: .storageModeShared)!
+                let bufferRMSMlpSub = metal.makeBuffer(bytes: rmsMlpSub, length: rmsMlpSub.count * 4, options: .storageModeShared)!
+                let bufferScaleQ = metal.makeBuffer(bytes: scaleQ, length: scaleQ.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleK = metal.makeBuffer(bytes: scaleK, length: scaleK.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleO = metal.makeBuffer(bytes: scaleO, length: scaleO.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleV = metal.makeBuffer(bytes: scaleV, length: scaleV.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleUp = metal.makeBuffer(bytes: scaleUp, length: scaleUp.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleDown = metal.makeBuffer(bytes: scaleDown, length: scaleDown.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                let bufferScaleGate = metal.makeBuffer(bytes: scaleGate, length: scaleGate.count * MemoryLayout<Float>.size, options: .storageModeShared)!
+                
+                let normalizedInput = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: bufferRMSInput, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+                
+                
+                let quantizedData = QuantizeActivations(entry: normalizedInput, nbCols: colsEmbeddings, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionQuantize)!
+                
+                let inputQuant = quantizedData.quantized
+                let scaleX = quantizedData.scales
+                
+                //mult
+                let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
+                let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
+                let wVSize = matrixInfos(nbLine : 640, nbColumn : 2560)
+                let wKSize = matrixInfos(nbLine : 640, nbColumn : 2560)
+                
+                var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weightQ, scaleW: bufferScaleQ, inputQuant: inputQuant, scaleX: scaleX, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+
+                var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, scaleW: bufferScaleK, inputQuant: inputQuant, scaleX: scaleX, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+
+                let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, scaleW: bufferScaleV, inputQuant: inputQuant, scaleX: scaleX, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
             
-            // create buffers
-            
-            let bufferRMSAttn = metal.makeBuffer(bytes: rmsAttn, length: rmsAttn.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferRMSMlp = metal.makeBuffer(bytes: rmsMlp, length: rmsMlp.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleQ = metal.makeBuffer(bytes: scaleQ, length: scaleQ.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleK = metal.makeBuffer(bytes: scaleK, length: scaleK.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleO = metal.makeBuffer(bytes: scaleO, length: scaleO.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleV = metal.makeBuffer(bytes: scaleV, length: scaleV.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleUp = metal.makeBuffer(bytes: scaleUp, length: scaleUp.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleDown = metal.makeBuffer(bytes: scaleDown, length: scaleDown.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            let bufferScaleGate = metal.makeBuffer(bytes: scaleGate, length: scaleGate.count * MemoryLayout<Float>.size, options: .storageModeShared)!
-            print("count : \(scaleQ.count)")
-            print("count : \(scaleGate.count)")
-            
-            
-            
-            let normalizedAttn = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: bufferRMSAttn, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
-            
-            //mult
-            let InputSize = matrixInfos(nbLine : tokens.count, nbColumn : 2560)
-            //q
-            let wSize = matrixInfos(nbLine : 2560, nbColumn : 2560)
-            var bufferQ = MultByW(WSize: wSize, inputSize: InputSize, weight: weightQ, scale: bufferScaleQ, input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            //k
-            let wKSize = matrixInfos(nbLine : 640, nbColumn : 2560)
-            var bufferK = MultByW(WSize: wKSize, inputSize: InputSize, weight: weightK, scale: bufferScaleK ,input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            //v
-            let wVSize = matrixInfos(nbLine : 640, nbColumn : 2560)
-            let bufferV = MultByW(WSize: wVSize, inputSize: InputSize, weight: weightV, scale: bufferScaleV,input: normalizedAttn, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            // RoPE
-            bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
-            
-            bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
-            
-            // Attention score
-            
-            var resultAttention = AttentionScore(buffer1: bufferQ, buffer2: bufferK, nbToken: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAttentionScore)
-            
-            
-            let totalAttentionRows = 20 * tokens.count
-            let attentionWidth = tokens.count
-            
-            resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionSubstractMax, getMaxFunction: kernelFunctionSearchMaxVector)
-            
-            resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionDivideBySum, getSumFunction: kernelFunctionSumVector)
-            
-            //context
-            let contextBuffer = ComputeWeightedSum(mat: resultAttention, v: bufferV, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionWeightedSum)
-            
-            // mult by o
-            let wOSize = matrixInfos(nbLine: 2560, nbColumn: 2560)
-            let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
-            
-            let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, scale: bufferScaleO,input: contextBuffer, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            //add
-            let addResult = AddArray(mat1: currentHiddenState, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
-            
-            // apply rms norm
-            let rmsNormResult = ApplyRmsNorm(entry: addResult, sizeEntry: colsEmbeddings, weightRMS: bufferRMSMlp, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
-            
-            //mult by Gate & Up
-            let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
-            
-            let weightsSize = matrixInfos(nbLine : 6912, nbColumn : 2560)
-            
-            let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, scale: bufferScaleGate, input: rmsNormResult, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, scale: bufferScaleUp, input: rmsNormResult, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            let sizeIntermediaire = tokens.count * 6912
-            ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionSiluAndMul)
-            
-            let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
-            let weightsSizeDown = matrixInfos(nbLine: 2560, nbColumn: 6912)
-            
-            let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, scale: bufferScaleDown, input: gateResult, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
-            
-            currentHiddenState = AddArray(mat1: addResult, mat2: downResult, size: tokens.count * 2560, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
-            
-            layerCommandBuffer.commit()
-            layerCommandBuffer.waitUntilCompleted()
-            
-            //test joss !!!!!!!!
-                        
-            if layerIndex == 0 {
-            let normArray = GetFromBuffer(buffer: normalizedAttn, size: 5)
-            print("RMS")
-            print(normArray)
-            
-            let outArray = GetFromBuffer(buffer: currentHiddenState, size: 5)
-            print("Layout 0")
-            print(outArray)
+                bufferQ = ApplyRoPE(buffer: bufferQ, nbTokens: tokens.count, dim: wSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+                            
+                bufferK = ApplyRoPE(buffer: bufferK, nbTokens: tokens.count, dim: wKSize.nbLine, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRoPE)
+                
+                var resultAttention = AttentionScore(buffer1: bufferQ, buffer2: bufferK, nbToken: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAttentionScore)
+                
+                
+                let totalAttentionRows = 20 * tokens.count
+                let attentionWidth = tokens.count
+                
+                resultAttention = SubstractMax(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionSubstractMax, getMaxFunction: kernelFunctionSearchMaxVector)
+                
+                resultAttention = DivideBySum(mat: resultAttention, nbcols: attentionWidth, nbToken: totalAttentionRows, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionDivideBySum, getSumFunction: kernelFunctionSumVector)
+                
+                //context
+                let contextBuffer = ComputeWeightedSum(mat: resultAttention, v: bufferV, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionWeightedSum)
+                
+                let normContextBuffer = ApplyRmsNorm(entry: contextBuffer, sizeEntry: 2560, weightRMS: bufferRMSAttnSub, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+                
+                // mult by o
+                let wOSize = matrixInfos(nbLine: 2560, nbColumn: 2560)
+                let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+                
+                
+                let quantizedContextData = QuantizeActivations(entry: normContextBuffer, nbCols: 2560, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionQuantize)!
+
+                let bufferAttentionOutput = MultByW(WSize: wOSize, inputSize: contextSize, weight: weightO, scaleW: bufferScaleO, inputQuant: quantizedContextData.quantized, scaleX: quantizedContextData.scales, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+                
+                //add
+                let afterAttn = AddArray(mat1: currentHiddenState!, mat2: bufferAttentionOutput, size: tokens.count * 2560, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
+                
+                
+                // apply rms norm
+                let rmsNormResult = ApplyRmsNorm(entry: afterAttn, sizeEntry: colsEmbeddings, weightRMS: bufferRMSPostAttn, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+                
+                //mult by Gate & Up
+                let resultSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
+                
+                let weightsSize = matrixInfos(nbLine : 6912, nbColumn : 2560)
+                
+                let quantizedMlpData = QuantizeActivations(entry: rmsNormResult, nbCols: 2560, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionQuantize)!
+
+                let gateResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightGate, scaleW: bufferScaleGate, inputQuant: quantizedMlpData.quantized, scaleX: quantizedMlpData.scales, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+
+                let upResult = MultByW(WSize: weightsSize, inputSize: resultSize, weight: weightUp, scaleW: bufferScaleUp, inputQuant: quantizedMlpData.quantized, scaleX: quantizedMlpData.scales, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+
+                let sizeIntermediaire = tokens.count * 6912
+                ApplySiLUandMul(gate: gateResult, up: upResult, size: sizeIntermediaire, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRelu2)
+                
+                let normDownInput = ApplyRmsNorm(entry: gateResult, sizeEntry: 6912, weightRMS: bufferRMSMlpSub, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)!
+                
+                let quantizedDownData = QuantizeActivations(entry: normDownInput, nbCols: 6912, nbTokens: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionQuantize)!
+                
+                let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
+                let weightsSizeDown = matrixInfos(nbLine: 2560, nbColumn: 6912)
+                
+                let downResult = MultByW(WSize: weightsSizeDown, inputSize: inputSizeDown, weight: weightDown, scaleW: bufferScaleDown, inputQuant: quantizedDownData.quantized, scaleX: quantizedDownData.scales, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionMult)
+                
+                currentHiddenState = AddArray(mat1: afterAttn, mat2: downResult, size: tokens.count * 2560, commandBuffer: layerCommandBuffer, metal: metal, metalFunction: kernelFunctionAddArrays)
+                
+                layerCommandBuffer.commit()
+                layerCommandBuffer.waitUntilCompleted()
+                
             }
         }
-    }
-    
-    let resultFinalRms = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: rmsFinalBuffer, tokenCount: tokens.count, commandBuffer: finalCommandBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)
+        
+        let finalCmdBuffer = queue.makeCommandBuffer()!
+        let resultFinalRms = ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: rmsFinalBuffer, tokenCount: tokens.count, commandBuffer: finalCmdBuffer, metal: metal, metalFunction: kernelFunctionRmsNorm)
 
-    let logitsBuffer = ComputeLogits(finalVectors: resultFinalRms, embeddings: embeddingsBuffer, nbTokens: tokens.count, dim: colsEmbeddings, commandBuffer: finalCommandBuffer, metal: metal, metalFunction: kernelFunctionComputeLogits)
-    
-    // Start
+        let logitsBuffer = ComputeLogits(finalVectors: resultFinalRms, embeddings: lmHeadBuffer, nbTokens: tokens.count, dim: colsEmbeddings, commandBuffer: finalCmdBuffer, metal: metal, metalFunction: kernelFunctionComputeLogits)
+        
+        // Start
 
-    finalCommandBuffer.commit()
-    finalCommandBuffer.waitUntilCompleted()
+        finalCmdBuffer.commit()
+        finalCmdBuffer.waitUntilCompleted()
 
-    let rawPointer = embeddingsResponseBuffer.contents()
-
-    let floatPointer = rawPointer.bindMemory(to: Float.self, capacity: Int(colsEmbeddings) * tokens.count)
-
-    let bufferPointer = UnsafeBufferPointer(start: floatPointer, count: Int(colsEmbeddings) * tokens.count)
-
-    let resultArray = Array(bufferPointer)
-
-
-    print("Nb tokens : \(resultArray.count/2560)")
-
-    let stride = Int(colsEmbeddings)
-    if tokens.count > 1 {
-        print("Valeur Token 0 [0] : \(resultArray[0])")
-        print("Valeur Token 1 [0] : \(resultArray[stride])")
-    }
-
-    /*let resultArrayMultQ = GetFromBuffer(buffer: bufferQ, size: (Int(colsEmbeddings) * tokens.count))
-    
-    let resultArrayMultV = GetFromBuffer(buffer: bufferV, size: (640 * tokens.count))
-    
-    let resultArrayMultK = GetFromBuffer(buffer: bufferK, size: (640 * tokens.count))
-    
-    let resultAttentionTest = GetFromBuffer(buffer: resultAttention, size: 20 * tokens.count * tokens.count )
-    
-    let context = GetFromBuffer(buffer: contextBuffer, size:  tokens.count * 20 * 128)
-    
-    let Attention = GetFromBuffer(buffer: bufferAttentionOutput, size:  tokens.count * 20 * 128)
-    
-    let add = GetFromBuffer(buffer: addResult, size:  tokens.count * 20 * 128)
-    
-    let uptab = GetFromBuffer(buffer: upResult, size:  tokens.count * 20 * 128)
-    
-    let gatetab = GetFromBuffer(buffer: gateResult, size:  tokens.count * 20 * 128)
-
-    let layer0Output = GetFromBuffer(buffer: addResult, size: 10)
-    
-    let testresultFinalRms = GetFromBuffer(buffer: resultFinalRms, size: 10)*/
-    
-    let logitsArray = GetFromBuffer(buffer: logitsBuffer, size: 128256)
-    
-    var bestScore: Float = -Float.greatestFiniteMagnitude
-    var bestTokenID = 0
-    
-    for i in 0..<logitsArray.count {
-        if logitsArray[i] > bestScore {
-            bestScore = logitsArray[i]
-            bestTokenID = i
+        let logitsArray = GetFromBuffer(buffer: logitsBuffer, size: 128256)
+        
+        var bestScore: Float = -Float.greatestFiniteMagnitude
+        var bestTokenID = 0
+        
+        for i in 0..<logitsArray.count {
+            if logitsArray[i] > bestScore {
+                bestScore = logitsArray[i]
+                bestTokenID = i
+            }
         }
+        tokens.append(UInt32(bestTokenID))
+        
     }
-    
-    
-    /*print("Here result mult Q :\n \(resultArrayMultQ[0..<10])")
-    
-    print("Here result mult V :\n \(resultArrayMultV[0..<10])")
-    
-    print("Here result mult K :\n \(resultArrayMultK[0..<10])")
-    
-    print("Here result Attention :\n \(resultAttentionTest[0..<10])")
-    
-    print("Here result context :\n \(context[0..<10])")
-    
-    print("Here result attention :\n \(Attention[0..<10])")
-    
-    print("Here result add :\n \(add[0..<10])")
-    
-    print("Here result up :\n \(uptab[0..<10])")
-    
-    print("Here result tab :\n \(gatetab[0..<10])")
-    
-    print("Exit : \n \(layer0Output[0..<10])")
-    
-    print("FINAL RMS : \n \(testresultFinalRms[0..<10])")*/
-    
-    print("result")
-    print("exit token : \(bestTokenID)")
-    print("Score : \(bestScore)")
+    print("exit : \(tokens)")
     return("ok")
 }
