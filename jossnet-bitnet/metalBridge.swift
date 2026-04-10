@@ -21,11 +21,10 @@ let urlLMHead = path.appendingPathComponent("weights_lm_head.bin")
 let urlRMSFinal = path.appendingPathComponent("weights_RMS_final.bin")
 
 
-func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> (quantized: MTLBuffer, scales: MTLBuffer)? {
+func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, pipeline: MTLComputePipelineState) -> (quantized: MTLBuffer, scales: MTLBuffer)? {
     
     guard let entry = entry else { return nil }
     
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -48,10 +47,9 @@ func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, commandB
     
     return (bufferXQuant, bufferScalesX)
 }
-func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: Int, dim: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
+func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: Int, dim: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, pipeline: MTLComputePipelineState) -> MTLBuffer? {
     guard let finalVectors = finalVectors, let embeddings = embeddings else { return nil }
     
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -75,11 +73,10 @@ func ComputeLogits(finalVectors: MTLBuffer?, embeddings: MTLBuffer?, nbTokens: I
     
     return logitsBuffer
 }
-func Embedding(tokens: [UInt32], colsEmbeddings : Int, embeddingsBuffer: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction : MTLFunction )->MTLBuffer?{
+func Embedding(tokens: [UInt32], colsEmbeddings : Int, embeddingsBuffer: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, pipeline: MTLComputePipelineState )->MTLBuffer?{
     
     guard let embeddingsBuffer else { return nil}
     
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
     
@@ -102,10 +99,9 @@ func Embedding(tokens: [UInt32], colsEmbeddings : Int, embeddingsBuffer: MTLBuff
     
     return embeddingsResponseBuffer
 }
-func ApplySiLUandMul(gate: MTLBuffer?, up : MTLBuffer?, size : Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> Void {
+func ApplySiLUandMul(gate: MTLBuffer?, up : MTLBuffer?, size : Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState) -> Void {
     guard let gate = gate, let up = up else { return }
     
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -118,13 +114,12 @@ func ApplySiLUandMul(gate: MTLBuffer?, up : MTLBuffer?, size : Int, commandBuffe
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroup)
     encoder.endEncoding()
 }
-func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, tokenCount : Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction)->MTLBuffer?{
+func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, tokenCount : Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState)->MTLBuffer?{
     guard let entry, let weightRMS else {
         return nil
     }
-    let pipelineRms = try! metal.makeComputePipelineState(function: metalFunction)
     let encoderRms = commandBuffer.makeComputeCommandEncoder()!
-    encoderRms.setComputePipelineState(pipelineRms);
+    encoderRms.setComputePipelineState(pipeline);
     
     let bufferAnswer = metal.makeBuffer(length: tokenCount * sizeEntry * MemoryLayout<Float>.size, options: .storageModeShared)!
     
@@ -144,9 +139,9 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     
     return bufferAnswer
 }
-func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
+func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLCommandBuffer, metal: MTLDevice, pipeline: MTLComputePipelineState) -> MTLBuffer? {
     guard let mat1, let mat2 else { return nil }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
+
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -164,11 +159,10 @@ func AddArray(mat1: MTLBuffer?, mat2: MTLBuffer?, size: Int, commandBuffer: MTLC
     
     return mat3
 }
-func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer? {
+func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBuffer: MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState) -> MTLBuffer? {
     guard let mat, let v else {
         return nil
     }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -202,14 +196,13 @@ func ComputeWeightedSum(mat: MTLBuffer?, v: MTLBuffer?, nbTokens: Int, commandBu
     
     return bufferOutput
 }
-func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction, getSumFunction: MTLFunction)->MTLBuffer?{
+func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState, pipelineSumValue: MTLComputePipelineState)->MTLBuffer?{
     guard let mat else {
         return nil
     }
     
-    let bufferSumValues = GetSumByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer, metal: metal, metalFunction: getSumFunction)
+    let bufferSumValues = GetSumByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer, metal: metal, pipeline: pipelineSumValue)
     
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
     
@@ -230,15 +223,14 @@ func DivideBySum(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : M
     return mat;
     
 }
-func SubstractMax(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction, getMaxFunction : MTLFunction)->MTLBuffer?{
+func SubstractMax(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState, pipelineGetMax: MTLComputePipelineState)->MTLBuffer?{
     guard let mat else {
         return nil
     }
     
     
-    let bufferMaxValues = GetMaxByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer, metal: metal, metalFunction: getMaxFunction)
+    let bufferMaxValues = GetMaxByVector(mat: mat, nbcols: nbcols, nbToken: nbToken, commandBuffer: commandBuffer, metal: metal, pipeline: pipelineGetMax)
 
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
     
@@ -259,11 +251,10 @@ func SubstractMax(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : 
     return mat;
     
 }
-func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction)->MTLBuffer?{
+func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState)->MTLBuffer?{
     guard let mat else {
         return nil
     }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
     
@@ -285,11 +276,10 @@ func GetSumByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer 
     
     return bufferSumValues;
 }
-func GetMaxByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction)->MTLBuffer?{
+func GetMaxByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState)->MTLBuffer?{
     guard let mat else {
         return nil
     }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
     
@@ -311,11 +301,10 @@ func GetMaxByVector(mat: MTLBuffer?, nbcols : Int, nbToken : Int, commandBuffer 
     
     return bufferMaxValues;
 }
-func AttentionScore(buffer1 : MTLBuffer?, buffer2 : MTLBuffer?, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction)->MTLBuffer?{
+func AttentionScore(buffer1 : MTLBuffer?, buffer2 : MTLBuffer?, nbToken : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState)->MTLBuffer?{
     guard let buffer1, let buffer2 else {
         return nil
     }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline);
 
@@ -345,11 +334,10 @@ func AttentionScore(buffer1 : MTLBuffer?, buffer2 : MTLBuffer?, nbToken : Int, c
     
     return bufferAns;
 }
-func ApplyRoPE(buffer : MTLBuffer?, nbTokens : Int, dim : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, metalFunction : MTLFunction) -> MTLBuffer? {
+func ApplyRoPE(buffer : MTLBuffer?, nbTokens : Int, dim : Int, commandBuffer : MTLCommandBuffer, metal : MTLDevice, pipeline: MTLComputePipelineState) -> MTLBuffer? {
     guard let buffer = buffer else {
         return nil
     }
-    let pipeline = try! metal.makeComputePipelineState(function: metalFunction)
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
@@ -380,18 +368,16 @@ func GetFromBuffer(buffer : MTLBuffer?, size: Int)->[Float]{
     return Array(bufferPointer)
 }
 
-func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight: [Int8], scaleW: MTLBuffer?, inputQuant: MTLBuffer?, scaleX: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, metalFunction: MTLFunction) -> MTLBuffer? {
+func MultByW(WSize: matrixInfos, inputSize: matrixInfos, bufferW: MTLBuffer, scaleW: MTLBuffer?, inputQuant: MTLBuffer?, scaleX: MTLBuffer?, commandBuffer: MTLCommandBuffer, metal: MTLDevice, pipeline: MTLComputePipelineState) -> MTLBuffer? {
     
     guard let inputQuant = inputQuant, let scaleW = scaleW, let scaleX = scaleX else { return nil }
     
-    let pipelineMult = try! metal.makeComputePipelineState(function: metalFunction)
     let encoderMult = commandBuffer.makeComputeCommandEncoder()!
-    encoderMult.setComputePipelineState(pipelineMult)
+    encoderMult.setComputePipelineState(pipeline)
     
     let dims: [UInt32] = [UInt32(inputSize.nbColumn), UInt32(inputSize.nbLine), UInt32(WSize.nbLine)]
     let bufferDims = metal.makeBuffer(bytes: dims, length: dims.count * 4, options: .storageModeShared)!
     
-    let bufferW = metal.makeBuffer(bytes: weight, length: weight.count, options: .storageModeShared)!
     let bufferA = metal.makeBuffer(length: inputSize.nbLine * WSize.nbLine * 4, options: .storageModeShared)!
     
     encoderMult.setBuffer(inputQuant, offset: 0, index: 0)
@@ -405,7 +391,7 @@ func MultByW(WSize: matrixInfos, inputSize: matrixInfos, weight: [Int8], scaleW:
     encoderMult.setBytes(&scaleWSize, length: MemoryLayout<UInt32>.size, index: 9)
 
     let MultGridSize = MTLSize(width: WSize.nbLine, height: inputSize.nbLine, depth: 1)
-    let groupWidth = min(pipelineMult.threadExecutionWidth, WSize.nbLine)
+    let groupWidth = min(pipeline.threadExecutionWidth, WSize.nbLine)
     let MultThreadGroupSize = MTLSize(width: groupWidth, height: 1, depth: 1)
 
     encoderMult.dispatchThreads(MultGridSize, threadsPerThreadgroup: MultThreadGroupSize)
