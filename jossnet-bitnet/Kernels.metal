@@ -11,7 +11,7 @@ using namespace metal;
 
 kernel void mult(device const char* X_quant [[ buffer(0) ]],
                  device const char* W [[ buffer(1) ]],
-                 device const uint* dims [[ buffer(2) ]],
+                 constant uint* dims [[ buffer(2) ]],
                  device float* answer [[ buffer(6) ]],
                  device const float* scale_W [[ buffer(7) ]],
                  device const float* scale_X [[ buffer(8) ]],
@@ -64,13 +64,12 @@ kernel void quantizeActivations(device const float* X [[ buffer(0) ]],
 kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
                              device float* answer [[ buffer(8) ]],
                              device const uint* index [[ buffer(9) ]],
-                             device const uint* nbCols [[ buffer(10) ]],
+                             constant uint& nbCols [[ buffer(10) ]],
                              uint2 gid [[ thread_position_in_grid ]]){
     // gid.y : actual token in tab
     // gid.x : index for actual token
     uint tokenId = index[gid.y];
-    int cols = nbCols[0];
-    answer[gid.x + gid.y * cols] = embeddingTable[tokenId * cols + gid.x];
+    answer[gid.x + gid.y * nbCols] = embeddingTable[tokenId * nbCols + gid.x];
 }
 
 kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
@@ -96,10 +95,9 @@ kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
     }
 }
 kernel void RoPE(device float* matrix [[ buffer(0) ]],
-                 device const uint* dim_ptr [[ buffer(1) ]],
+                 constant uint& dim [[ buffer(1) ]],
                  uint2 gid [[ thread_position_in_grid ]]){
     
-    uint dim = *dim_ptr;
     if (gid.y * 2 >= dim) return;
 
     uint head_dim = 128;
@@ -128,9 +126,9 @@ kernel void RoPE(device float* matrix [[ buffer(0) ]],
 kernel void AttentionScore(device const float* Q [[ buffer(0) ]],
                            device const float* K [[ buffer(1) ]],
                            device float* ans [[ buffer(2) ]],
-                           device const int& nbHeadsQ [[ buffer(3) ]],
-                           device const int& nbTokens [[ buffer(4) ]],
-                           device const int& ratio [[ buffer(5) ]],
+                           constant int& nbHeadsQ [[ buffer(3) ]],
+                           constant int& nbTokens [[ buffer(4) ]],
+                           constant int& ratio [[ buffer(5) ]],
                            uint3 gid [[ thread_position_in_grid ]]){
     
     if (gid.x >= uint(nbTokens) || gid.y >= uint(nbTokens) || gid.z >= uint(nbHeadsQ)) return;
@@ -159,47 +157,47 @@ kernel void AttentionScore(device const float* Q [[ buffer(0) ]],
     ans[index_out] = score;
 }
 kernel void SearchMaxVector(device const float* m [[ buffer(0) ]],
-                            device const uint* nbCols [[ buffer(1) ]],
+                            constant uint& nbCols [[ buffer(1) ]],
                             device float* max [[ buffer(2) ]],
                             uint gid [[ thread_position_in_grid ]]){
     int vec = gid;
-    float maxVal = m[vec * *nbCols];
+    float maxVal = m[vec * nbCols];
     
-    for(uint i = 1 ; i<*nbCols; i++){
-        if(m[vec * *nbCols + i]>maxVal){
-            maxVal = m[vec * *nbCols + i];
+    for(uint i = 1 ; i< nbCols; i++){
+        if(m[vec * nbCols + i]>maxVal){
+            maxVal = m[vec * nbCols + i];
         }
     }
     max[vec] = maxVal;
 }
 kernel void SubstractMax(device float* m [[buffer(0)]],
-                         device const int* nbCols [[ buffer(1) ]],
+                         constant uint& nbCols [[ buffer(1) ]],
                          device const float* max [[ buffer(2) ]],
                          uint2 gid [[ thread_position_in_grid ]]){
-    if (gid.x >= uint(*nbCols)) return;
+    if (gid.x >= uint(nbCols)) return;
     
-    m[*nbCols * gid.y + gid.x] = exp(m[*nbCols * gid.y + gid.x ] - max[gid.y]);
+    m[nbCols * gid.y + gid.x] = exp(m[nbCols * gid.y + gid.x ] - max[gid.y]);
 }
 kernel void SumVector(device const float* m [[ buffer(0) ]],
-                            device const uint* nbCols [[ buffer(1) ]],
+                            constant uint& nbCols [[ buffer(1) ]],
                             device float* sum [[ buffer(2) ]],
                             uint gid [[ thread_position_in_grid ]]){
     int vec = gid;
-    float sumVal = m[vec * *nbCols];
+    float sumVal = m[vec * nbCols];
     
-    for(uint i = 1 ; i<*nbCols; i++){
-        sumVal += m[vec * *nbCols + i];
+    for(uint i = 1 ; i<nbCols; i++){
+        sumVal += m[vec * nbCols + i];
     }
     sum[vec] = sumVal;
 }
 kernel void DivideBySum(device float* m [[buffer(0)]],
-                         device const int* nbCols [[ buffer(1) ]],
+                         constant uint& nbCols [[ buffer(1) ]],
                          device const float* sum [[ buffer(2) ]],
                          uint2 gid [[ thread_position_in_grid ]]){
     
-    if (gid.x >= uint(*nbCols)) return;
+    if (gid.x >= uint(nbCols)) return;
     
-    m[*nbCols * gid.y + gid.x] = m[*nbCols * gid.y + gid.x ]/sum[gid.y];
+    m[nbCols * gid.y + gid.x] = m[nbCols * gid.y + gid.x ]/sum[gid.y];
 }
 kernel void weightedSum(device const float* Scores [[ buffer(0) ]],
                          device const float* V [[ buffer(1) ]],
