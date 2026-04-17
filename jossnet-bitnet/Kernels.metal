@@ -76,22 +76,27 @@ kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
                     constant uint& nbCols [[ buffer(2) ]],
                     device const float* weight [[ buffer(3) ]],
                     device float* answer [[ buffer(4) ]],
-                    uint2 gid [[ thread_position_in_grid ]]){
+                    uint2 gid [[ thread_position_in_grid ]],
+                    uint  ti  [[ thread_index_in_simdgroup ]],
+                    uint  lanes [[ threads_per_simdgroup ]]){
     
-    uint startingIndex = gid.x * nbCols;
+    uint startingIndex = gid.y * nbCols;
 
-    float powSum = 0.0f;
-    for(uint i = 0; i < nbCols; i++){
+    float localSum = 0.0f;
+
+    for(uint i = ti; i < nbCols; i += lanes) {
         float val = vecList[startingIndex + i];
-        powSum += val * val;
+        localSum += val * val;
     }
 
-    float meanSquare = powSum / (float)nbCols;
+    float totalSum = simd_sum(localSum);
+
+    float meanSquare = totalSum / (float)nbCols;
     
-    float inv_coeff = rsqrt(meanSquare + 1e-5f);
+    float invCoeff = rsqrt(meanSquare + 1e-5f);
     
-    for(uint i = 0; i < nbCols; i++){
-        answer[startingIndex + i] = (vecList[startingIndex + i] * inv_coeff) * weight[i];
+    for(uint i = ti; i < nbCols; i += lanes) {
+        answer[startingIndex + i] = (vecList[startingIndex + i] * invCoeff) * weight[i];
     }
 }
 kernel void RoPE(device float* matrix [[ buffer(0) ]],

@@ -113,6 +113,9 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     let encoderRms = commandBuffer.makeComputeCommandEncoder()!
     encoderRms.setComputePipelineState(pipeline);
     
+    let threadgroupWidth = pipeline.threadExecutionWidth
+
+    
     var cols = UInt32(sizeEntry)
     
     encoderRms.setBuffer(entry, offset: 0, index: 1);
@@ -120,8 +123,8 @@ func ApplyRmsNorm(entry: MTLBuffer?, sizeEntry : Int, weightRMS : MTLBuffer?, to
     encoderRms.setBuffer(weightRMS, offset: 0, index: 3)
     encoderRms.setBuffer(answer, offset: 0, index: 4)
 
-    let RmsGridSize = MTLSize(width: tokenCount, height: 1, depth: 1)
-    let RmsThreadGroupSize = MTLSize(width: 1, height: 1, depth: 1)
+    let RmsGridSize = MTLSize(width: threadgroupWidth, height: tokenCount, depth: 1)
+    let RmsThreadGroupSize = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
 
     encoderRms.dispatchThreads(RmsGridSize, threadsPerThreadgroup: RmsThreadGroupSize)
     encoderRms.endEncoding()

@@ -237,6 +237,7 @@ func Main()->String?{
         //embeddings
 
         let embCommandBuffer = queue.makeCommandBuffer()!
+        
         Embedding(tokens: tokens,colsEmbeddings: colsEmbeddings, embeddingsBuffer: embeddingsBuffer, commandBuffer: embCommandBuffer, metal: metal, pipeline: pipelineGetFromEmbedding, answer: residualBufferA)
         
         embCommandBuffer.commit()
