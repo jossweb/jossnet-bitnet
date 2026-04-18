@@ -11,7 +11,7 @@ First of all, this project is an opportunity for me to learn more about how an L
 This project is still in progress. The model is able to return logical results, but it is currently very slow and not accurate.
 
 ### Current performance
-* M3 chip (8 CPU - 10 GPU | 16 GB) ~ 0.92s per token 
+* M3 chip (8 CPU - 10 GPU | 16 GB) ~ 0.84s per token 
 
 ### Next steps
 * Work on optimization

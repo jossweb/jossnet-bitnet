@@ -38,23 +38,26 @@ kernel void quantizeActivations(device const float* X [[ buffer(0) ]],
                                 device char* X_quant [[ buffer(1) ]],
                                 device float* scales_X [[ buffer(2) ]],
                                 constant uint& nbCols [[ buffer(3) ]],
-                                uint gid [[ thread_position_in_grid ]]) {
+                                uint2 gid [[ thread_position_in_grid ]],
+                                uint  ti  [[ thread_index_in_simdgroup ]],
+                                uint  lanes [[ threads_per_simdgroup ]]) {
     
-    uint base_idx = gid * nbCols;
+    uint base_idx = gid.y * nbCols;
     
-    float max_val = 1e-6f;
-    for(uint i = 0; i < nbCols; i++) {
+    float local_max = 1e-6f;
+    for(uint i = ti; i < nbCols; i+=lanes) {
         float val = abs(X[base_idx + i]);
-        if(val > max_val) {
-            max_val = val;
+        if(val > local_max) {
+            local_max = val;
         }
     }
     
-    float scale_x = max_val / 127.0f;
-    scales_X[gid] = scale_x;
+    float final_max = simd_max(local_max);
+    float scale_x = final_max / 127.0f;
+    scales_X[gid.y] = scale_x;
     
     float inv_scale = 1.0f / scale_x;
-    for(uint i = 0; i < nbCols; i++) {
+    for(uint i = ti; i < nbCols; i+=lanes) {
         float scaled_val = X[base_idx + i] * inv_scale;
         int quantized = (int)round(scaled_val);
         quantized = quantized > 127 ? 127 : (quantized < -128 ? -128 : quantized);

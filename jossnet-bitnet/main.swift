@@ -258,7 +258,7 @@ func Main()->String?{
                 try! ApplyRmsNorm(entry: currentHiddenState, sizeEntry: colsEmbeddings, weightRMS: layerResourcesList[layerIndex].bufferRMSInput, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, pipeline: pipelineRmsNorm, answer: workBufferWA)
                 
                 
-                QuantizeActivations(entry: workBufferWA, nbCols: colsEmbeddings, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
+                try! QuantizeActivations(entry: workBufferWA, nbCols: colsEmbeddings, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
 
                 try! MultByW(WSize: wSize, inputSize: inputSize, bufferW: layerResourcesList[layerIndex].bufferWeightQ, scaleW: layerResourcesList[layerIndex].bufferScaleQ, inputQuant: workBufferQuantized, scaleX: workBufferScales, commandBuffer: layerCommandBuffer, metal: metal, pipeline: pipelineMult, answer: workBufferWA)
 
@@ -290,7 +290,7 @@ func Main()->String?{
                 let contextSize = matrixInfos(nbLine: tokens.count, nbColumn: 2560)
                 
                 
-                QuantizeActivations(entry: workBufferWA, nbCols: 2560, nbTokens: tokens.count,outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
+                try! QuantizeActivations(entry: workBufferWA, nbCols: 2560, nbTokens: tokens.count,outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
 
                 try! MultByW(WSize: wOSize, inputSize: contextSize, bufferW: layerResourcesList[layerIndex].bufferWeightO, scaleW: layerResourcesList[layerIndex].bufferScaleO, inputQuant: workBufferQuantized, scaleX: workBufferScales, commandBuffer: layerCommandBuffer, metal: metal, pipeline: pipelineMult, answer: workBufferWA)
                 
@@ -306,7 +306,7 @@ func Main()->String?{
                 
                 let weightsSize = matrixInfos(nbLine : 6912, nbColumn : 2560)
                 
-                QuantizeActivations(entry: workBufferWB, nbCols: 2560, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
+                try! QuantizeActivations(entry: workBufferWB, nbCols: 2560, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
 
                 try! MultByW(WSize: weightsSize, inputSize: resultSize, bufferW: layerResourcesList[layerIndex].bufferWeightGate, scaleW: layerResourcesList[layerIndex].bufferScaleGate, inputQuant: workBufferQuantized, scaleX: workBufferScales, commandBuffer: layerCommandBuffer, metal: metal, pipeline: pipelineMult, answer: workBufferWA)
 
@@ -317,7 +317,7 @@ func Main()->String?{
                 
                 try! ApplyRmsNorm(entry: workBufferWA, sizeEntry: 6912, weightRMS: layerResourcesList[layerIndex].bufferRMSMlpSub, tokenCount: tokens.count, commandBuffer: layerCommandBuffer, metal: metal, pipeline: pipelineRmsNorm, answer: workBufferWB)
                 
-                QuantizeActivations(entry: workBufferWB, nbCols: 6912, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
+                try! QuantizeActivations(entry: workBufferWB, nbCols: 6912, nbTokens: tokens.count, outBufferQuantized: workBufferQuantized, outBufferScales: workBufferScales, commandBuffer: layerCommandBuffer, pipeline: pipelineQuantize)
                 
                 let inputSizeDown = matrixInfos(nbLine: tokens.count, nbColumn: 6912)
                 let weightsSizeDown = matrixInfos(nbLine: 2560, nbColumn: 6912)

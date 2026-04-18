@@ -24,14 +24,16 @@ let urlLMHead = path.appendingPathComponent("weights_lm_head.bin")
 let urlRMSFinal = path.appendingPathComponent("weights_RMS_final.bin")
 
 
-func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, outBufferQuantized: MTLBuffer, outBufferScales: MTLBuffer, commandBuffer: MTLCommandBuffer, pipeline: MTLComputePipelineState) {
+func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, outBufferQuantized: MTLBuffer, outBufferScales: MTLBuffer, commandBuffer: MTLCommandBuffer, pipeline: MTLComputePipelineState) throws{
     
-    guard let entry = entry else { return }
+    guard let entry = entry else { throw MissingBuffer.missingData }
     
     let encoder = commandBuffer.makeComputeCommandEncoder()!
     encoder.setComputePipelineState(pipeline)
     
     var cols32 = UInt32(nbCols)
+    
+    let threadgroupWidth = pipeline.threadExecutionWidth
     
     encoder.setBuffer(entry, offset: 0, index: 0)
     
@@ -40,8 +42,8 @@ func QuantizeActivations(entry: MTLBuffer?, nbCols: Int, nbTokens: Int, outBuffe
     
     encoder.setBytes(&cols32, length: MemoryLayout<UInt32>.size, index: 3)
     
-    let gridSize = MTLSize(width: nbTokens, height: 1, depth: 1)
-    let threadGroupSize = MTLSize(width: 32, height: 1, depth: 1)
+    let gridSize = MTLSize(width: threadgroupWidth, height: nbTokens, depth: 1)
+    let threadGroupSize = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
     
     encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadGroupSize)
     encoder.endEncoding()
