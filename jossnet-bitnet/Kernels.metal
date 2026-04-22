@@ -9,62 +9,63 @@
 using namespace metal;
 
 
-kernel void mult(device const char* X_quant [[ buffer(0) ]],
+kernel void Mult(device const char* xQuant [[ buffer(0) ]],
                  device const char* W [[ buffer(1) ]],
                  constant uint* dims [[ buffer(2) ]],
                  device float* answer [[ buffer(6) ]],
-                 device const float* scale_W [[ buffer(7) ]],
-                 device const float* scale_X [[ buffer(8) ]],
-                 constant uint& scale_w_size [[ buffer(9) ]],
-                 uint2 gid [[ thread_position_in_grid ]]) {
+                 device const float* scaleW [[ buffer(7) ]],
+                 device const float* scaleX [[ buffer(8) ]],
+                 constant uint& scaleWSize [[ buffer(9) ]],
+                 uint3 gid [[ thread_position_in_grid ]],
+                 uint  ti  [[ thread_index_in_simdgroup ]]) {
+
     
-    uint K = dims[0];
-    uint M = dims[1];
-    uint N = dims[2];
-    
-    if (gid.x >= N || gid.y >= M) return;
+    if (gid.y >= dims[1] || gid.z >= dims[2]) return;
 
     float sum = 0.0f;
-    uint base_X = gid.y * K;
-    uint base_W = gid.x * K;
+    uint baseX = gid.y * dims[0];
+    uint baseW = gid.z * dims[0];
 
-    for(uint i = 0; i < K; i++) {
-        sum += (float)X_quant[base_X + i] * (float)W[base_W + i];
+    for(uint i = ti; i < dims[0]; i += 32) {
+        sum += (float)xQuant[baseX + i] * (float)W[baseW + i];
     }
+    sum = simd_sum(sum);
     
-    answer[gid.y * N + gid.x] = sum * scale_W[gid.x % scale_w_size] * scale_X[gid.y];
+    if (ti == 0) {
+        answer[gid.y * dims[2] + gid.z] = sum * scaleW[gid.z % scaleWSize] * scaleX[gid.y];
+    }
 }
-kernel void quantizeActivations(device const float* X [[ buffer(0) ]],
-                                device char* X_quant [[ buffer(1) ]],
-                                device float* scales_X [[ buffer(2) ]],
+kernel void QuantizeActivations(device const float* X [[ buffer(0) ]],
+                                device char* XQuant [[ buffer(1) ]],
+                                device float* scalesX [[ buffer(2) ]],
                                 constant uint& nbCols [[ buffer(3) ]],
                                 uint2 gid [[ thread_position_in_grid ]],
                                 uint  ti  [[ thread_index_in_simdgroup ]],
                                 uint  lanes [[ threads_per_simdgroup ]]) {
     
-    uint base_idx = gid.y * nbCols;
+    uint baseIdx = gid.y * nbCols;
     
-    float local_max = 1e-6f;
+    float localMax = 1e-6f;
     for(uint i = ti; i < nbCols; i+=lanes) {
-        float val = abs(X[base_idx + i]);
-        if(val > local_max) {
-            local_max = val;
+        float val = abs(X[baseIdx + i]);
+        if(val > localMax) {
+            localMax = val;
         }
     }
     
-    float final_max = simd_max(local_max);
-    float scale_x = final_max / 127.0f;
-    scales_X[gid.y] = scale_x;
+    float final_max = simd_max(localMax);
+    float scaleVal = final_max / 127.0f;
+    scalesX[gid.y] = scaleVal;
     
-    float inv_scale = 1.0f / scale_x;
+    float invScale = 1.0f / scaleVal;
     for(uint i = ti; i < nbCols; i+=lanes) {
-        float scaled_val = X[base_idx + i] * inv_scale;
-        int quantized = (int)round(scaled_val);
+        float scaledVal = X[baseIdx + i] * invScale;
+        int quantized = (int)round(scaledVal);
         quantized = quantized > 127 ? 127 : (quantized < -128 ? -128 : quantized);
-        X_quant[base_idx + i] = (char)quantized;
+        XQuant[baseIdx + i] = (char)quantized;
     }
 }
-kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
+kernel void GetFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
                              device float* answer [[ buffer(8) ]],
                              device const uint* index [[ buffer(9) ]],
                              constant uint& nbCols [[ buffer(10) ]],
@@ -75,7 +76,7 @@ kernel void getFromEmbedding(device const float* embeddingTable [[ buffer(7) ]],
     answer[gid.x + gid.y * nbCols] = embeddingTable[tokenId * nbCols + gid.x];
 }
 
-kernel void rmsNorm(device const float* vecList [[ buffer(1) ]],
+kernel void RmsNorm(device const float* vecList [[ buffer(1) ]],
                     constant uint& nbCols [[ buffer(2) ]],
                     device const float* weight [[ buffer(3) ]],
                     device float* answer [[ buffer(4) ]],
@@ -109,15 +110,14 @@ kernel void RoPE(device float* matrix [[ buffer(0) ]],
     if (gid.y * 2 >= dim) return;
 
     uint head_dim = 128;
-    uint half_head_dim = 64;
     
     uint head_idx = (gid.y * 2) / head_dim;
     
-    uint feature_idx_in_half = gid.y % half_head_dim;
+    uint feature_idx_in_half = gid.y % head_dim/2;
     
     uint base_idx = (gid.x * dim) + (head_idx * head_dim);
     uint index1 = base_idx + feature_idx_in_half;
-    uint index2 = base_idx + feature_idx_in_half + half_head_dim;
+    uint index2 = base_idx + feature_idx_in_half + head_dim/2;
 
     float position = (float)gid.x;
     
@@ -127,9 +127,13 @@ kernel void RoPE(device float* matrix [[ buffer(0) ]],
 
     float temp1 = matrix[index1];
     float temp2 = matrix[index2];
-
-    matrix[index1] = temp1 * cos(angle) - temp2 * sin(angle);
-    matrix[index2] = temp2 * cos(angle) + temp1 * sin(angle);
+    
+    float s, c;
+        
+    s = sincos(angle, c);
+    
+    matrix[index1] = temp1 * c - temp2 * s;
+    matrix[index2] = temp2 * c + temp1 * s;
 }
 kernel void AttentionScore(device const float* Q [[ buffer(0) ]],
                            device const float* K [[ buffer(1) ]],
@@ -207,7 +211,7 @@ kernel void DivideBySum(device float* m [[buffer(0)]],
     
     m[nbCols * gid.y + gid.x] = m[nbCols * gid.y + gid.x ]/sum[gid.y];
 }
-kernel void weightedSum(device const float* Scores [[ buffer(0) ]],
+kernel void WeightedSum(device const float* Scores [[ buffer(0) ]],
                          device const float* V [[ buffer(1) ]],
                          device float* Output [[ buffer(2) ]],
                         constant int& nbTokens [[ buffer(3) ]],
@@ -242,13 +246,13 @@ kernel void weightedSum(device const float* Scores [[ buffer(0) ]],
     
     Output[index_out] = sum;
 }
-kernel void addArrays(device const float* A [[ buffer(0) ]],
+kernel void AddArrays(device const float* A [[ buffer(0) ]],
                       device const float* B [[ buffer(1) ]],
                       device float* C [[ buffer(2) ]],
                       uint id [[ thread_position_in_grid ]]){
     C[id] = A[id] + B[id];
 }
-kernel void relu2(device float* Gate [[ buffer(0) ]],
+kernel void Relu2(device float* Gate [[ buffer(0) ]],
                        device const float* Up [[ buffer(1) ]],
                        uint id [[ thread_position_in_grid ]]){
     float g = Gate[id];
@@ -256,7 +260,7 @@ kernel void relu2(device float* Gate [[ buffer(0) ]],
     float reluSquared = relu * relu;
     Gate[id] = reluSquared * Up[id];
 }
-kernel void computeLogits(device const float* final_vectors [[ buffer(0) ]],
+kernel void ComputeLogits(device const float* final_vectors [[ buffer(0) ]],
                           device const float* embeddings [[ buffer(1) ]],
                           device float* logits [[ buffer(2) ]],
                           constant uint& hidden_dim [[ buffer(3) ]],

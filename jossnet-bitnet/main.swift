@@ -64,13 +64,13 @@ let queue = metal.makeCommandQueue()!
 
 let library = metal.makeDefaultLibrary()!
 
-guard let kernelFunctionMult = library.makeFunction(name: "mult") else {
+guard let kernelFunctionMult = library.makeFunction(name: "Mult") else {
     fatalError("Error : Function mult is not available")
 }
-guard let kernelFunctionGetFromEmbedding = library.makeFunction(name: "getFromEmbedding") else {
+guard let kernelFunctionGetFromEmbedding = library.makeFunction(name: "GetFromEmbedding") else {
     fatalError("Error : Function getFromEmbedding is not available")
 }
-guard let kernelFunctionRmsNorm = library.makeFunction(name: "rmsNorm") else {
+guard let kernelFunctionRmsNorm = library.makeFunction(name: "RmsNorm") else {
     fatalError("Error : Function rmsNorm is not available")
 }
 guard let kernelFunctionRoPE = library.makeFunction(name: "RoPE") else {
@@ -91,19 +91,19 @@ guard let kernelFunctionSumVector = library.makeFunction(name: "SumVector") else
 guard let kernelFunctionDivideBySum = library.makeFunction(name: "DivideBySum") else {
     fatalError("Error : Function divideBySum is not available")
 }
-guard let kernelFunctionWeightedSum = library.makeFunction(name: "weightedSum") else {
+guard let kernelFunctionWeightedSum = library.makeFunction(name: "WeightedSum") else {
     fatalError("Error : Function divideBySum is not available")
 }
-guard let kernelFunctionAddArrays = library.makeFunction(name: "addArrays") else {
+guard let kernelFunctionAddArrays = library.makeFunction(name: "AddArrays") else {
     fatalError("Error : Function divideBySum is not available")
 }
-guard let kernelFunctionRelu2 = library.makeFunction(name: "relu2") else {
+guard let kernelFunctionRelu2 = library.makeFunction(name: "Relu2") else {
     fatalError("Error : Function siluAndMul is not available")
 }
-guard let kernelFunctionComputeLogits = library.makeFunction(name: "computeLogits") else {
+guard let kernelFunctionComputeLogits = library.makeFunction(name: "ComputeLogits") else {
     fatalError("Error : Function computeLogits is not available")
 }
-guard let kernelFunctionQuantize = library.makeFunction(name: "quantizeActivations") else {
+guard let kernelFunctionQuantize = library.makeFunction(name: "QuantizeActivations") else {
     fatalError("Error : Function quantizeActivations is not available")
 }
 

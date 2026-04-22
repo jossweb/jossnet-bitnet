@@ -327,6 +327,8 @@ func MultByW(WSize: matrixInfos, inputSize: matrixInfos, bufferW: MTLBuffer, sca
     
     let dims: [UInt32] = [UInt32(inputSize.nbColumn), UInt32(inputSize.nbLine), UInt32(WSize.nbLine)]
     
+    let threadgroupWidth = pipeline.threadExecutionWidth
+    
     encoderMult.setBuffer(inputQuant, offset: 0, index: 0)
     encoderMult.setBuffer(bufferW, offset: 0, index: 1)
     encoderMult.setBytes(dims, length: 12, index: 2)
@@ -337,9 +339,9 @@ func MultByW(WSize: matrixInfos, inputSize: matrixInfos, bufferW: MTLBuffer, sca
     var scaleWSize = UInt32(scaleW.length / MemoryLayout<Float>.size)
     encoderMult.setBytes(&scaleWSize, length: MemoryLayout<UInt32>.size, index: 9)
 
-    let MultGridSize = MTLSize(width: WSize.nbLine, height: inputSize.nbLine, depth: 1)
-    let groupWidth = min(pipeline.threadExecutionWidth, WSize.nbLine)
-    let MultThreadGroupSize = MTLSize(width: groupWidth, height: 1, depth: 1)
+    let MultGridSize = MTLSize(width: threadgroupWidth, height: inputSize.nbLine, depth: WSize.nbLine)
+    let MultThreadGroupSize = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
+    encoderMult.dispatchThreads(MultGridSize, threadsPerThreadgroup: MultThreadGroupSize)
 
     encoderMult.dispatchThreads(MultGridSize, threadsPerThreadgroup: MultThreadGroupSize)
     encoderMult.endEncoding()
